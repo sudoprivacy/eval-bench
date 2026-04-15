@@ -109,6 +109,12 @@ _JUDGE_SYSTEM_PROMPT = (
     '{"passed": true|false, "reason": "short explanation"}'
 )
 
+# Default model for llm_judge. We intentionally do NOT fall back to the
+# target's model: asking the model we're evaluating to grade itself is
+# a recipe for rubber-stamping. Override per-grader via `model:` in the
+# rubric YAML, or globally by patching DEFAULT_JUDGE_MODEL.
+DEFAULT_JUDGE_MODEL = "claude-opus-4-6"
+
 
 def _parse_judge_output(text: str) -> tuple[bool, str] | None:
     """Pick the first JSON object out of `text` and extract passed/reason."""
@@ -140,7 +146,9 @@ async def _default_judge(
         system_prompt=_JUDGE_SYSTEM_PROMPT,
         allowed_tools=[],
         cwd=str(cwd),
-        model=grader.model or ctx.model,
+        # Judge model is independent of the target's model. See
+        # DEFAULT_JUDGE_MODEL comment for rationale.
+        model=grader.model or DEFAULT_JUDGE_MODEL,
         max_turns=2,
         setting_sources=[],
     )
