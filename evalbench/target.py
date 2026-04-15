@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Annotated, Literal, Union
 
@@ -15,6 +16,10 @@ class SkillTarget(BaseModel):
     type: Literal["skill"] = "skill"
     path: str = Field(..., description="Path to the skill directory (relative to suite).")
     allowed_tools: list[str] = Field(default_factory=lambda: ["Read", "Write", "Bash"])
+    # Extra directories to expose via `add_dirs` (e.g. a sibling skill
+    # this one references via `Read ../shared/SKILL.md`). Paths are
+    # resolved relative to the suite dir.
+    extra_add_dirs: list[str] = Field(default_factory=list)
 
 
 class PromptTarget(BaseModel):
@@ -71,6 +76,13 @@ def build_options(
         system_prompt = skill_md.read_text()
         allowed_tools = list(target.allowed_tools)
         add_dirs = [skill_path]
+        for extra in target.extra_add_dirs:
+            extra_path = (suite_dir / extra).resolve()
+            if not extra_path.is_dir():
+                raise TargetBuildError(
+                    f"extra_add_dirs entry is not a directory: {extra_path}"
+                )
+            add_dirs.append(extra_path)
     elif isinstance(target, PromptTarget):
         system_prompt = target.system_prompt
         allowed_tools = list(target.allowed_tools)
@@ -86,6 +98,14 @@ def build_options(
     else:  # pragma: no cover — discriminated union exhausts this
         raise TargetBuildError(f"unknown target type: {type(target).__name__}")
 
+    # Agent's Bash tool inherits this env. We forward the parent
+    # process's env (so task-relevant vars like CHANDAO_* or proxy
+    # config reach the CLI) but prepend cwd to PATH so case-local
+    # CLI shims drop in naturally. Hermeticity against Claude Code's
+    # ambient context is enforced separately via `setting_sources=[]`.
+    env = dict(os.environ)
+    env["PATH"] = f"{cwd}:{env.get('PATH', '')}"
+
     return ClaudeAgentOptions(
         system_prompt=system_prompt,
         allowed_tools=allowed_tools,
@@ -93,6 +113,7 @@ def build_options(
         add_dirs=add_dirs,
         model=model,
         max_turns=max_turns,
+        env=env,
         # Hermetic: don't inherit the user's ~/.claude or project CLAUDE.md,
         # which would otherwise leak context into every eval and make
         # pass/fail depend on whoever ran the suite.
