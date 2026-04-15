@@ -35,9 +35,6 @@ class AgentRunResult:
     wall_ms: int = 0
 
 
-_MAX_TURN_STOPS = {"max_turns", "turn_limit"}
-
-
 def _extract_usage(usage: dict | None) -> TokenUsage:
     if not usage:
         return TokenUsage()
@@ -52,6 +49,7 @@ def _extract_usage(usage: dict | None) -> TokenUsage:
 async def _drive(prompt: str, options: ClaudeAgentOptions) -> AgentRunResult:
     result = AgentRunResult(termination=Termination.error.value,
                             error="no ResultMessage received")
+    got_result = False
     try:
         async for msg in query(prompt=prompt, options=options):
             if isinstance(msg, AssistantMessage):
@@ -61,26 +59,36 @@ async def _drive(prompt: str, options: ClaudeAgentOptions) -> AgentRunResult:
                     elif isinstance(block, TextBlock):
                         pass
             elif isinstance(msg, ResultMessage):
+                got_result = True
                 result.turns = msg.num_turns
                 result.tokens = _extract_usage(msg.usage)
                 result.cost_usd = msg.total_cost_usd
                 result.final_text = msg.result or ""
-                if msg.is_error:
+                subtype = msg.subtype or ""
+                if subtype == "success":
+                    result.termination = Termination.completed.value
+                    result.error = None
+                elif "max_turns" in subtype or msg.stop_reason in {"max_turns", "turn_limit"}:
+                    result.termination = Termination.max_turns.value
+                    result.error = None
+                elif msg.is_error:
                     result.termination = Termination.error.value
                     result.error = (
                         (msg.errors[0] if msg.errors else None)
                         or msg.result
+                        or subtype
                         or "unknown error"
                     )
-                elif msg.stop_reason in _MAX_TURN_STOPS:
-                    result.termination = Termination.max_turns.value
-                    result.error = None
                 else:
                     result.termination = Termination.completed.value
                     result.error = None
     except Exception as exc:  # pragma: no cover — SDK error paths
-        result.termination = Termination.error.value
-        result.error = f"{type(exc).__name__}: {exc}"
+        # Only surface stream-level exceptions if we never got a ResultMessage.
+        # Some SDK versions emit a subprocess teardown error *after* a valid
+        # ResultMessage, which would otherwise clobber a good run.
+        if not got_result:
+            result.termination = Termination.error.value
+            result.error = f"{type(exc).__name__}: {exc}"
     return result
 
 

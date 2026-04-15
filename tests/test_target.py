@@ -35,6 +35,8 @@ def test_build_options_skill_reads_skill_md(tmp_path: Path) -> None:
     assert opts.add_dirs == [skill_dir.resolve()]
     assert opts.model == "claude-sonnet-4-6"
     assert opts.max_turns == 7
+    # Eval runs are hermetic by default — no user/project settings leak in.
+    assert opts.setting_sources == []
 
 
 def test_build_options_skill_missing_dir(tmp_path: Path) -> None:

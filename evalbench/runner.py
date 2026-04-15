@@ -89,8 +89,19 @@ async def run_case_trial(
         async def _default(p: str, o: ClaudeAgentOptions) -> AgentRunResult:
             return await run_agent(p, o, timeout_s=case.limits.timeout_s)
 
+        # With `setting_sources=[]` (hermetic mode) Claude Code no longer
+        # injects its normal <env> block — so the model has no idea what
+        # cwd is and will hallucinate one. Explicitly tell it.
+        framed_prompt = (
+            f"<env>\nWorking directory: {cwd}\n"
+            "All file paths must be absolute (under the working directory) "
+            "or relative to it. Do not write to or read paths outside this "
+            "directory.\n</env>\n\n"
+            f"{case.prompt}"
+        )
+
         fn = agent_fn or _default
-        agent = await fn(case.prompt, opts)
+        agent = await fn(framed_prompt, opts)
 
         judge_ctx = JudgeContext(
             case_prompt=case.prompt,

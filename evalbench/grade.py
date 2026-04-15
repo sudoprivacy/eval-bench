@@ -142,6 +142,7 @@ async def _default_judge(
         cwd=str(cwd),
         model=grader.model or ctx.model,
         max_turns=2,
+        setting_sources=[],
     )
     res = await run_agent(user_msg, opts, timeout_s=60)
     if res.termination != Termination.completed.value:

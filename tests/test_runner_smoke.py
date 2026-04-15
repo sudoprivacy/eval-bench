@@ -188,3 +188,25 @@ def test_append_jsonl_roundtrip(tmp_path: Path) -> None:
     assert d1["case_id"] == "a" and d1["passed"] is True
     assert d1["tokens"] == {"input": 1, "output": 2, "cache_read": 0, "cache_create": 0}
     assert d1["grades"][0]["type"] == "file_exists"
+
+
+@pytest.mark.asyncio
+async def test_prompt_is_framed_with_working_directory(tmp_path: Path) -> None:
+    """Runner must tell the agent what cwd is (we disable Claude Code's env)."""
+    suite_dir = _make_suite(tmp_path)
+    suite = load_suite(suite_dir)
+
+    seen = {}
+
+    async def capture(prompt, options):
+        seen["prompt"] = prompt
+        seen["cwd"] = options.cwd
+        return AgentRunResult(termination=Termination.completed.value)
+
+    await run_case_trial(suite.cases[0], suite, 1, agent_fn=capture)
+
+    # The envelope announces cwd and the original prompt is still there.
+    assert "<env>" in seen["prompt"]
+    assert "Working directory:" in seen["prompt"]
+    assert seen["cwd"] in seen["prompt"]
+    assert seen["prompt"].endswith("do it")

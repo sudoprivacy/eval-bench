@@ -93,4 +93,8 @@ def build_options(
         add_dirs=add_dirs,
         model=model,
         max_turns=max_turns,
+        # Hermetic: don't inherit the user's ~/.claude or project CLAUDE.md,
+        # which would otherwise leak context into every eval and make
+        # pass/fail depend on whoever ran the suite.
+        setting_sources=[],
     )
