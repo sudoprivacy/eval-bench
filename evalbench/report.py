@@ -129,16 +129,26 @@ def render_markdown(run: RunData) -> str:
 
     lines.append("## Per-trial results")
     lines.append("")
-    lines.append("| Case | Trial | Pass | Termination | Turns | Tools | Wall ms | In tok | Out tok |")
-    lines.append("|---|---|---|---|---:|---:|---:|---:|---:|")
+    lines.append(
+        "| Case | Trial | Pass | Termination | Turns | Tools | Wall ms | "
+        "In tok | Cache R | Cache W | Out tok | Cost USD |"
+    )
+    lines.append(
+        "|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|"
+    )
     for r in run.results:
         t = _tok(r)
         mark = "PASS" if r.get("passed") else "FAIL"
+        cost_val = r.get("cost_usd")
+        cost_cell = f"{cost_val:.4f}" if isinstance(cost_val, (int, float)) else "-"
         lines.append(
             f"| {r.get('case_id','?')} | {r.get('trial','?')} | "
             f"{mark} | {r.get('termination','?')} | "
             f"{r.get('turns', 0)} | {r.get('tool_calls', 0)} | "
-            f"{r.get('wall_ms', 0)} | {t.get('input', 0)} | {t.get('output', 0)} |"
+            f"{r.get('wall_ms', 0)} | "
+            f"{t.get('input', 0)} | {t.get('cache_read', 0)} | "
+            f"{t.get('cache_create', 0)} | {t.get('output', 0)} | "
+            f"{cost_cell} |"
         )
     lines.append("")
 
