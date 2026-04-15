@@ -127,19 +127,50 @@ async def test_setup_command_runs_and_fixtures_copy(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_llm_judge_is_skipped_and_fails_until_implemented(tmp_path: Path) -> None:
+async def test_llm_judge_pass_via_injected_judge(tmp_path: Path) -> None:
+    from evalbench.grade import GradeResult
     suite_dir = _make_suite(tmp_path, grade_yaml=(
         "grade:\n"
         "  - type: llm_judge\n"
-        "    rubric: \"judge me\"\n"
+        "    rubric: \"is it polite?\"\n"
     ))
     suite = load_suite(suite_dir)
+
+    async def fake_judge(grader, cwd, ctx):
+        assert ctx.case_prompt == "do it"
+        assert "done" in ctx.agent_final_text
+        return GradeResult("llm_judge", True, "polite enough")
+
     result = await run_case_trial(
-        suite.cases[0], suite, 1, agent_fn=_ok_agent_factory(),
+        suite.cases[0], suite, 1,
+        agent_fn=_ok_agent_factory(),
+        judge_fn=fake_judge,
+    )
+    assert result.passed is True
+    assert result.grades[0].type == "llm_judge"
+    assert result.grades[0].passed is True
+    assert "polite" in result.grades[0].detail
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_fail_blocks_case(tmp_path: Path) -> None:
+    from evalbench.grade import GradeResult
+    suite_dir = _make_suite(tmp_path, grade_yaml=(
+        "grade:\n"
+        "  - type: llm_judge\n"
+        "    rubric: \"is it polite?\"\n"
+    ))
+    suite = load_suite(suite_dir)
+
+    async def fake_judge(grader, cwd, ctx):
+        return GradeResult("llm_judge", False, "rude")
+
+    result = await run_case_trial(
+        suite.cases[0], suite, 1,
+        agent_fn=_ok_agent_factory(),
+        judge_fn=fake_judge,
     )
     assert result.passed is False
-    assert result.grades[0].type == "llm_judge"
-    assert result.grades[0].passed is False
 
 
 def test_append_jsonl_roundtrip(tmp_path: Path) -> None:

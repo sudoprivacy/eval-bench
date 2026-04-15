@@ -14,7 +14,7 @@ from claude_agent_sdk import ClaudeAgentOptions
 from .agent import AgentRunResult, run_agent
 from .case import Case
 from .config import Suite
-from .grade import LlmJudgeGrader, evaluate_sync
+from .grade import JudgeContext, JudgeFn, evaluate
 from .metrics import CaseResult, GradeRecord, Termination
 from .target import build_options
 
@@ -50,18 +50,13 @@ def _prepare_cwd(case: Case, suite: Suite, cwd: Path) -> None:
             )
 
 
-def _grade_case(case: Case, cwd: Path) -> list[GradeRecord]:
+async def _grade_case(
+    case: Case, cwd: Path, ctx: JudgeContext,
+    judge_fn: JudgeFn | None,
+) -> list[GradeRecord]:
     out: list[GradeRecord] = []
     for g in case.grade:
-        if isinstance(g, LlmJudgeGrader):
-            # Wired up in the grader step; until then, mark as skipped-fail
-            # so cases relying on it don't silently pass.
-            out.append(GradeRecord(
-                type="llm_judge", passed=False,
-                detail="llm_judge evaluation not yet implemented",
-            ))
-            continue
-        r = evaluate_sync(g, cwd)
+        r = await evaluate(g, cwd, context=ctx, judge_fn=judge_fn)
         out.append(GradeRecord(type=r.type, passed=r.passed, detail=r.detail))
     return out
 
@@ -73,6 +68,7 @@ async def run_case_trial(
     *,
     keep_failed: bool = False,
     agent_fn: AgentFn | None = None,
+    judge_fn: JudgeFn | None = None,
 ) -> CaseResult:
     """Run one trial of one case end-to-end and return the result."""
     assert suite.source_dir is not None
@@ -94,7 +90,12 @@ async def run_case_trial(
         fn = agent_fn or _default
         agent = await fn(case.prompt, opts)
 
-        grades = _grade_case(case, cwd)
+        judge_ctx = JudgeContext(
+            case_prompt=case.prompt,
+            agent_final_text=agent.final_text,
+            model=suite.run.model,
+        )
+        grades = await _grade_case(case, cwd, judge_ctx, judge_fn)
         passed = (
             agent.termination == Termination.completed.value
             and all(g.passed for g in grades)
