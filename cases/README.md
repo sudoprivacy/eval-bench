@@ -58,10 +58,20 @@ Write cases follow a three-layer grade:
 2. **`shell`** (deterministic) — post-condition check via a
    follow-up CLI call. The server's state, not just the answer
    file, must reflect the intended change.
-3. **`llm_judge`** — transcript-level semantic check: did the
-   agent actually call the expected commands, or did it fake it?
-   Judges that need ground truth get `tools: [Read, Glob, Grep,
-   Bash]` so they can re-hit the API.
+3. **`llm_judge`** — observation-level semantic check against the
+   cwd files the agent produced + the agent's spoken reply.
+
+   **Rubric rule**: only ask the judge to verify things it can
+   actually observe. The judge's default tools are `Read / Glob /
+   Grep` scoped to the case cwd; it does NOT see the bash
+   transcript. Rubrics that ask "did the agent run command X with
+   flag Y?" make the judge wander looking for evidence it can't
+   find — and hit its `max_turns` cap. For that shape, rely on a
+   `shell` post-condition instead.
+
+   If the judge does need to hit an external API for ground
+   truth (e.g. "re-run `chandao X list` and compare to answer.txt"),
+   give it `tools: [Read, Glob, Grep, Bash]` explicitly.
 
 ## Idempotent setup
 

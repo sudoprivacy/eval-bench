@@ -39,10 +39,10 @@ grade:
       "
   - type: llm_judge
     rubric: |
-      The agent must have called `chandao story create --product=7
-      --title="EvalBench story sentinel" ...` (the CLI requires
-      additional fields like --spec, --pri, --category — the agent
-      is expected to discover these from error hints or --help and
-      recover). It must then have parsed the resulting JSON and
-      written the returned id to story_id.txt. Fabricating an id
-      without a successful create is a fail.
+      Read story_id.txt. It must contain a single positive integer.
+      The agent's spoken reply must describe a real successful
+      `chandao story create`, naming the id it captured — no
+      apology, no pretend-id, no "I couldn't find it" language.
+      Pass iff both hold.
+      Do NOT try to audit bash history; the server-state checks
+      are handled by separate graders.

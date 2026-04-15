@@ -36,8 +36,10 @@ grade:
       "
   - type: llm_judge
     rubric: |
-      The agent must have called `chandao testcase create --product=7
-      --title="EvalBench testcase sentinel" --type=... --pri=... -F steps=...`
-      (or equivalent), parsed the returned JSON, and written the id
-      to testcase_id.txt. Fabricating an id without a successful
-      create is a fail.
+      Read testcase_id.txt. It must contain a single positive
+      integer. The agent's spoken reply must describe a real
+      successful `chandao testcase create`, naming the id it
+      captured — no apology, no pretend-id, no "I couldn't find
+      it" language. Pass iff both hold.
+      Do NOT try to audit bash history; the server-state checks
+      are handled by separate graders.
