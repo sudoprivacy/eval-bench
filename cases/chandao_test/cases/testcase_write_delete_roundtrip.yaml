@@ -1,0 +1,49 @@
+id: testcase_write_delete_roundtrip
+prompt: |
+  Create a scratch chandao test case under product 7 titled
+  "EvalBench testcase (delete-me)", then delete it using `chandao
+  testcase delete <id>`. After deletion, verify the test case no
+  longer exists (a follow-up `chandao testcase list --product=7`
+  must not list it) and write "deleted" to a file called
+  `status.txt` — just that one word.
+# Idempotent seed: clear any leftover sentinel from a previous run.
+setup:
+  - |
+    chandao testcase list --product=7 2>/dev/null | python -c "
+    import json, sys, subprocess
+    d = json.loads(sys.stdin.read())
+    for c in (d.get('data', {}) or {}).get('testcases', []) or []:
+        if c.get('title') == 'EvalBench testcase (delete-me)':
+            subprocess.run(['chandao', 'testcase', 'delete', str(c['id'])],
+                           check=False)
+    " || true
+limits:
+  max_turns: 16
+  timeout_s: 180
+grade:
+  - type: file_exists
+    path: status.txt
+  - type: shell
+    command: |
+      got=$(cat status.txt | tr -d '\n')
+      test "$got" = "deleted"
+  # Server-side truth: the sentinel title must not appear in `testcase list`.
+  - type: shell
+    command: |
+      chandao testcase list --product=7 | python -c "
+      import json, sys
+      d = json.loads(sys.stdin.read())
+      assert d.get('ok'), d
+      titles = [c.get('title') for c in
+                (d.get('data') or {}).get('testcases', []) or []]
+      assert 'EvalBench testcase (delete-me)' not in titles, titles
+      "
+  - type: llm_judge
+    rubric: |
+      Read status.txt. It must contain exactly "deleted"
+      (optionally a trailing newline). The agent's spoken reply
+      must describe a real create → delete → list-verify
+      round-trip — no apology, no pretend-delete. Pass iff both
+      hold.
+      Do NOT try to audit bash history; the server-state checks
+      are handled by separate graders.

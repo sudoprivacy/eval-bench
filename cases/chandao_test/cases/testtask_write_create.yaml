@@ -1,0 +1,98 @@
+id: testtask_write_create
+prompt: |
+  Open a new chandao test task (测试单) named "EvalBench Test
+  Round Sentinel" for product 7. The test task must be scheduled
+  against the build whose id is written in `build_id.txt` in the
+  current working directory, beginning 2026-04-15 and ending
+  2026-04-28. After it's created, write the test task's numeric
+  id to a file called `testtask_id.txt` — just the id, nothing
+  else.
+
+  Note: the chandao-test skill may claim testtask creation
+  requires the `chandao api call POST /api.php?m=testtask&f=create`
+  escape hatch. Check `chandao testtask --help` yourself before
+  committing to that path — skill docs can lag behind the CLI.
+# Setup seeds a project → execution → build chain so the case has
+# a valid build id to schedule the test task against, and purges
+# any sentinel testtask leftover from a prior run. Project, exec,
+# and build are created fresh each run (list-by-name is unreliable
+# for builds on this server), so they accumulate in the sandbox.
+# That's acceptable for a sandbox and keeps the setup uniform.
+setup:
+  - |
+    python - <<'PY'
+    import json, subprocess, sys
+    from urllib.parse import urlparse
+
+    def run(*args):
+        r = subprocess.run(list(args), capture_output=True, text=True,
+                           timeout=60)
+        return json.loads(r.stdout) if r.stdout.strip() else {}
+
+    # 1. Purge any stale sentinel testtask (legacy two-step delete).
+    d = run('chandao', 'testtask', 'list')
+    for t in (d.get('data', {}) or {}).get('testtasks', []) or []:
+        if t.get('name') == 'EvalBench Test Round Sentinel':
+            c = run('chandao', 'testtask', 'delete', str(t['id']))
+            ok_url = (((c.get('data') or {}).get('data') or {})
+                      .get('okURL', ''))
+            if ok_url:
+                path = urlparse(ok_url).path
+                run('chandao', 'api', 'call', 'GET', path,
+                    '--flavor=legacy')
+
+    # 2. Seed a fresh project. (list-by-name lookup is reliable for
+    # projects, but we want the project to always have a fresh
+    # execution + build under it, so just create new each run.)
+    c = run('chandao', 'project', 'create',
+            '--name=EvalBench Test Round Project',
+            '--hasProduct=1', '--begin=2026-04-15', '--end=2027-04-15',
+            '-F', 'products=7')
+    assert c.get('ok'), c
+    proj_id = c['data']['id']
+
+    # 3. Execution under the project.
+    c = run('chandao', 'execution', 'create', f'--project={proj_id}',
+            '--name=EvalBench Test Round Exec',
+            '--begin=2026-04-15', '--end=2026-05-15')
+    assert c.get('ok'), c
+    exec_id = c['data']['id']
+
+    # 4. Build under the execution. -F product=7 is required even
+    # though the execution already declares its product linkage.
+    c = run('chandao', 'build', 'create', f'--execution={exec_id}',
+            '--name=EvalBench Test Round Build', '-F', 'product=7')
+    assert c.get('ok'), c
+    build_id = c['data']['id']
+
+    # 5. Hand the agent just the build id — the prompt does the rest.
+    open('build_id.txt', 'w').write(str(build_id))
+    PY
+limits:
+  max_turns: 16
+  timeout_s: 240
+grade:
+  - type: file_exists
+    path: testtask_id.txt
+  - type: shell
+    command: "grep -Eq '^[1-9][0-9]*$' testtask_id.txt"
+  # Server-side truth: the test task must exist with the right name.
+  - type: shell
+    command: |
+      id=$(cat testtask_id.txt)
+      chandao testtask get "$id" | python -c "
+      import json, sys
+      d = json.loads(sys.stdin.read())
+      assert d.get('ok'), d
+      name = (d.get('data') or {}).get('name')
+      assert name == 'EvalBench Test Round Sentinel', f'name was {name!r}'
+      "
+  - type: llm_judge
+    rubric: |
+      Read testtask_id.txt. It must contain a single positive
+      integer. The agent's spoken reply must describe a real
+      successful test-task creation that produced that id — no
+      apology, no pretend-id, no "I couldn't find it" language.
+      Pass iff both hold.
+      Do NOT try to audit bash history; the server-state checks
+      are handled by separate graders.

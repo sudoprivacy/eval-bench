@@ -9,7 +9,7 @@ cases/
   chandao_product/      # skill: chandao-product   (4 cases)
   chandao_work/         # skill: chandao-work      (4 cases)
   chandao_delivery/     # skill: chandao-delivery  (2 cases, read-only)
-  chandao_test/         # skill: chandao-test      (3 cases)
+  chandao_test/         # skill: chandao-test      (6 cases)
 ```
 
 Inside each suite:

@@ -1,0 +1,64 @@
+id: testcase_write_update_title
+prompt: |
+  There is a chandao test case whose id is written in
+  `testcase_id.txt` in the current working directory. Rename its
+  title to "EvalBench testcase (renamed)" using `chandao testcase
+  update`. After the update succeeds, write the test case's final
+  title (as returned by `chandao testcase get`) to a file called
+  `final_title.txt` — just the title, no quotes, trailing
+  newline optional.
+# Seed: make sure the sentinel testcase exists so the agent has
+# something concrete to update. Idempotent: clean up any leftover
+# with either the pre- or post-rename title first, then create
+# fresh and record its id.
+setup:
+  - |
+    chandao testcase list --product=7 2>/dev/null | python -c "
+    import json, sys, subprocess
+    d = json.loads(sys.stdin.read())
+    stale = {'EvalBench testcase to rename', 'EvalBench testcase (renamed)'}
+    for c in (d.get('data', {}) or {}).get('testcases', []) or []:
+        if c.get('title') in stale:
+            subprocess.run(['chandao', 'testcase', 'delete', str(c['id'])],
+                           check=False)
+    " || true
+  - |
+    chandao testcase create --product=7 --title="EvalBench testcase to rename" \
+        --type=feature --pri=3 -F steps='probe step' | python -c "
+    import json, sys
+    d = json.loads(sys.stdin.read())
+    assert d.get('ok'), d
+    cid = (d.get('data') or {}).get('id')
+    assert cid, d
+    open('testcase_id.txt', 'w').write(str(cid))
+    "
+limits:
+  max_turns: 12
+  timeout_s: 120
+grade:
+  - type: file_exists
+    path: final_title.txt
+  - type: shell
+    command: |
+      got=$(cat final_title.txt | tr -d '\n')
+      test "$got" = "EvalBench testcase (renamed)"
+  # Server-side truth.
+  - type: shell
+    command: |
+      id=$(cat testcase_id.txt)
+      chandao testcase get "$id" | python -c "
+      import json, sys
+      d = json.loads(sys.stdin.read())
+      assert d.get('ok'), d
+      title = (d.get('data') or {}).get('title')
+      assert title == 'EvalBench testcase (renamed)', f'title was {title!r}'
+      "
+  - type: llm_judge
+    rubric: |
+      Read final_title.txt. It must contain exactly "EvalBench
+      testcase (renamed)" (optionally followed by a newline). The
+      agent's spoken reply must describe a real successful
+      `chandao testcase update` that produced that title — no
+      apology, no pretend-update. Pass iff both hold.
+      Do NOT try to audit bash history; the server-state checks
+      are handled by separate graders.
