@@ -1,0 +1,11 @@
+id: greet-ada
+prompt: "Please greet Ada Lovelace."
+limits:
+  max_turns: 6
+  timeout_s: 60
+grade:
+  - type: file_exists
+    path: greeting.txt
+  - type: file_contains
+    path: greeting.txt
+    needle: "Ada"

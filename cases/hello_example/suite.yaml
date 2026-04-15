@@ -1,0 +1,10 @@
+target:
+  type: skill
+  path: ../../skills/hello
+  allowed_tools:
+    - Read
+    - Write
+    - Bash
+run:
+  concurrency: 2
+  trials: 1

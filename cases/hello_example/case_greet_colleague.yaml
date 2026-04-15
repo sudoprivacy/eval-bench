@@ -1,0 +1,16 @@
+id: greet-colleague
+prompt: "Greet a new colleague starting today named Carol Shaw."
+limits:
+  max_turns: 6
+  timeout_s: 90
+grade:
+  - type: file_exists
+    path: greeting.txt
+  - type: file_contains
+    path: greeting.txt
+    needle: "Carol"
+  - type: llm_judge
+    rubric: >
+      The greeting should be warm and welcoming, address Carol by name,
+      be appropriate for a first day at work, and be no more than three
+      sentences long.
