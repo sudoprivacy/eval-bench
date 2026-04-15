@@ -1,0 +1,14 @@
+target:
+  type: skill
+  path: /home/user/chandao-cli/skills/chandao-delivery
+  extra_add_dirs:
+    - /home/user/chandao-cli/skills/chandao-shared
+  allowed_tools:
+    - Read
+    - Write
+    - Bash
+    - Glob
+    - Grep
+run:
+  concurrency: 1
+  trials: 1

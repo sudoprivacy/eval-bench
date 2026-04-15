@@ -1,0 +1,25 @@
+id: release_read_list
+prompt: |
+  List all releases for chandao product id 7. Write a short answer
+  to a file called `answer.txt` in the current working directory
+  saying how many releases exist for that product (or noting the
+  list is empty). Keep it to 3 sentences max.
+limits:
+  max_turns: 12
+  timeout_s: 120
+grade:
+  - type: file_exists
+    path: answer.txt
+  - type: llm_judge
+    tools: [Read, Glob, Grep, Bash]
+    rubric: |
+      You are verifying an agent's release-list summary.
+
+      Step 1: Run `chandao release list --product=7` yourself (Bash).
+              Count data.releases.
+      Step 2: Read answer.txt and compare.
+
+      Pass iff:
+      - answer.txt's reported count matches the real API count.
+      - answer.txt does not invent releases.
+      - answer.txt is concise (3 sentences max).

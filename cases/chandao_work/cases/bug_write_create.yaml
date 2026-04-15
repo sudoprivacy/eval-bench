@@ -1,0 +1,44 @@
+id: bug_write_create
+prompt: |
+  Create a new chandao bug under product id 7 titled "EvalBench bug
+  sentinel". After it's created, write the bug's numeric id (as
+  returned by the API) to a file called `bug_id.txt` — just the id.
+  Consult the skill for required fields (openedBuild etc.) and
+  recover from HTTP 400s by reading the error hint.
+setup:
+  - |
+    chandao bug list --product=7 2>/dev/null | python -c "
+    import json, sys, subprocess
+    d = json.loads(sys.stdin.read())
+    for b in (d.get('data', {}) or {}).get('bugs', []) or []:
+        if b.get('title') == 'EvalBench bug sentinel':
+            subprocess.run(['chandao', 'bug', 'delete', str(b['id'])],
+                           check=False)
+    " || true
+limits:
+  max_turns: 16
+  timeout_s: 180
+grade:
+  - type: file_exists
+    path: bug_id.txt
+  - type: shell
+    command: "grep -Eq '^[1-9][0-9]*$' bug_id.txt"
+  - type: shell
+    command: |
+      id=$(cat bug_id.txt)
+      chandao bug get "$id" | python -c "
+      import json, sys
+      d = json.loads(sys.stdin.read())
+      assert d.get('ok'), d
+      title = (d.get('data') or {}).get('title')
+      assert title == 'EvalBench bug sentinel', f'title was {title!r}'
+      "
+  - type: llm_judge
+    rubric: |
+      Read bug_id.txt. It must contain a single positive integer.
+      The agent's spoken reply must describe a real successful
+      `chandao bug create`, naming the id it captured — no
+      apology, no pretend-id, no "I couldn't find it" language.
+      Pass iff both hold.
+      Do NOT try to audit bash history; the server-state checks
+      are handled by separate graders.

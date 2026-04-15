@@ -1,0 +1,25 @@
+id: testtask_read_list
+prompt: |
+  List all test tasks (测试单) in chandao. Write a short answer to
+  a file called `answer.txt` in the current working directory
+  saying how many test tasks exist (or noting the list is empty).
+  Keep it to 3 sentences max.
+limits:
+  max_turns: 12
+  timeout_s: 120
+grade:
+  - type: file_exists
+    path: answer.txt
+  - type: llm_judge
+    tools: [Read, Glob, Grep, Bash]
+    rubric: |
+      You are verifying an agent's testtask-list summary.
+
+      Step 1: Run `chandao testtask list` yourself (Bash). Count
+              data.testtasks.
+      Step 2: Read answer.txt and compare.
+
+      Pass iff:
+      - answer.txt's reported count matches the real API count.
+      - answer.txt does not invent test tasks.
+      - answer.txt is concise (3 sentences max).

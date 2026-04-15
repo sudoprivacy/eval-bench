@@ -1,0 +1,25 @@
+id: testcase_read_list
+prompt: |
+  List all test cases under chandao product id 7. Write a short
+  answer to a file called `answer.txt` in the current working
+  directory saying how many test cases exist (or noting the list
+  is empty). Keep it to 3 sentences max.
+limits:
+  max_turns: 12
+  timeout_s: 120
+grade:
+  - type: file_exists
+    path: answer.txt
+  - type: llm_judge
+    tools: [Read, Glob, Grep, Bash]
+    rubric: |
+      You are verifying an agent's testcase-list summary.
+
+      Step 1: Run `chandao testcase list --product=7` yourself (Bash).
+              Count data.testcases.
+      Step 2: Read answer.txt and compare.
+
+      Pass iff:
+      - answer.txt's reported count matches the real API count.
+      - answer.txt does not invent cases.
+      - answer.txt is concise (3 sentences max).

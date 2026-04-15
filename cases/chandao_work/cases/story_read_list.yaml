@@ -1,0 +1,27 @@
+id: story_read_list
+prompt: |
+  List all stories under chandao product id 7. Write a short answer
+  to a file called `answer.txt` in the current working directory
+  saying how many stories exist (or noting the list is empty).
+  Keep it to 3 sentences max.
+limits:
+  max_turns: 12
+  timeout_s: 120
+grade:
+  - type: file_exists
+    path: answer.txt
+  - type: llm_judge
+    # Bash so the judge can call chandao itself to establish ground truth.
+    tools: [Read, Glob, Grep, Bash]
+    rubric: |
+      You are verifying an agent's story-list summary.
+
+      Step 1: Run `chandao story list --product=7` yourself to see what
+              the API returns (use your Bash tool). Count data.stories.
+      Step 2: Read answer.txt and compare.
+
+      Pass iff:
+      - answer.txt's reported count matches the real API count.
+      - answer.txt does not invent stories that aren't in the API
+        response.
+      - answer.txt is concise (3 sentences max).
