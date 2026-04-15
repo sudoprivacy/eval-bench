@@ -45,6 +45,9 @@ class LlmJudgeGrader(BaseModel):
     # read-only default set. `[]` = no tools (preset hint only).
     tools: list[str] | None = None
     max_turns: int = 12
+    # Wall-clock budget for the judge. 120s was tight for an agentic
+    # judge that shells out to external APIs; 240s is comfortable.
+    timeout_s: int = 240
 
 
 Grader = Annotated[
@@ -194,7 +197,7 @@ async def _default_judge(
         # result.structured_output.
         output_format={"type": "json_schema", "schema": JUDGE_OUTPUT_SCHEMA},
     )
-    res = await run_agent(user_msg, opts, timeout_s=120)
+    res = await run_agent(user_msg, opts, timeout_s=grader.timeout_s)
     if res.termination != Termination.completed.value:
         return GradeResult(
             "llm_judge", False,

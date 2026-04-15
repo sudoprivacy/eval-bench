@@ -4,6 +4,19 @@ prompt: |
   `evalbench-sandbox`. After it's created, write the product's numeric
   id (as returned by the API) to a file called `product_id.txt` in
   the current working directory — just the id, nothing else.
+# Start from a known state: delete any leftover "EvalBench Sandbox"
+# from previous runs so `product create` exercises the real create path,
+# not the duplicate-recovery path.
+setup:
+  - |
+    chandao product list 2>/dev/null | python -c "
+    import json, os, sys, subprocess
+    d = json.loads(sys.stdin.read())
+    for p in (d.get('data', {}) or {}).get('products', []) or []:
+        if p.get('name') == 'EvalBench Sandbox':
+            subprocess.run(['chandao', 'product', 'delete', str(p['id'])],
+                           check=False)
+    " || true
 limits:
   max_turns: 12
   timeout_s: 120
