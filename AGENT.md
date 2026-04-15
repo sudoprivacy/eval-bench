@@ -104,15 +104,20 @@ runner or target modules.
    judge system prompt, keep the `{"passed": bool, "reason": str}`
    contract or update the parser.
 
-8. **Judge evidence is auto-collected from cwd** — after the agent
+8. **The judge is an agent** — it gets `Read`, `Glob`, `Grep` tools
+   scoped to the case cwd (no Bash/Write/Edit, so it can't mutate
+   files and corrupt later graders). Per `LlmJudgeGrader`:
+   `tools: [...]` overrides the tool set; `max_turns` defaults to 12.
+   The judge explores on its own, so rubrics like "is the greeting
+   polite?" see the actual file, not just the agent's spoken reply.
+
+9. **`judge_evidence` is a hint, not a whitelist** — after the agent
    runs, `runner._collect_evidence` snapshots text files from the
    case cwd (bounded: 8 files, 64 KiB each, 256 KiB total) and the
-   judge prompt embeds them verbatim. This means a judge rubric that
-   asks "is the greeting polite?" actually reads `greeting.txt`
-   instead of only the agent's spoken reply. Cases can override via
-   `judge_evidence: [file1, file2]` (explicit list) or
-   `judge_evidence: []` (no evidence). Path traversal outside cwd is
-   rejected even for explicit lists.
+   judge prompt embeds them verbatim as a starter. The judge can
+   still `Read` any file in cwd. `judge_evidence: [file1]` narrows
+   the hint; `judge_evidence: []` sends no hint (judge must explore).
+   Path traversal outside cwd is rejected even for explicit lists.
 
 ## Conventions
 

@@ -41,6 +41,11 @@ class LlmJudgeGrader(BaseModel):
     type: Literal["llm_judge"] = "llm_judge"
     rubric: str
     model: str | None = None
+    # The judge is itself an agent: it can call these tools (scoped to
+    # the case cwd) to decide what to inspect. `None` = use the safe
+    # read-only default set. `[]` = no tools (preset hint only).
+    tools: list[str] | None = None
+    max_turns: int = 12
 
 
 Grader = Annotated[
@@ -107,11 +112,19 @@ JudgeFn = Callable[["LlmJudgeGrader", Path, JudgeContext], Awaitable[GradeResult
 
 
 _JUDGE_SYSTEM_PROMPT = (
-    "You are a strict evaluation judge. You receive a rubric, the task "
-    "that was given to an agent, and the agent's final output. Decide "
-    "pass or fail. Reply with a single JSON object on one line — no "
-    "prose, no code fences, no extra keys: "
-    '{"passed": true|false, "reason": "short explanation"}'
+    "You are a strict evaluation judge for an agent's output.\n\n"
+    "You receive a rubric, the original task given to the agent, and "
+    "the agent's final spoken reply. You are running in the agent's "
+    "working directory and have read-only tools (Read, Glob, Grep) to "
+    "inspect any files the agent produced or modified. Use them as "
+    "needed to verify the rubric — do not rely solely on the agent's "
+    "spoken reply, which may not reflect the actual artifacts.\n\n"
+    "After gathering sufficient evidence, emit exactly ONE JSON object "
+    "as your final message — no prose before it, no code fences, no "
+    "extra keys:\n"
+    '{"passed": true|false, "reason": "short explanation"}\n\n'
+    "If a rubric condition is not verifiable from the files or the "
+    "spoken reply, return passed=false with the reason."
 )
 
 # Default model for llm_judge. We intentionally do NOT fall back to the
@@ -120,19 +133,44 @@ _JUDGE_SYSTEM_PROMPT = (
 # rubric YAML, or globally by patching DEFAULT_JUDGE_MODEL.
 DEFAULT_JUDGE_MODEL = "claude-opus-4-6"
 
+# Read-only tool set the judge agent gets by default. Intentionally no
+# Bash (could mutate files and corrupt later graders) and no Write/Edit.
+DEFAULT_JUDGE_TOOLS = ["Read", "Glob", "Grep"]
+
 
 def _parse_judge_output(text: str) -> tuple[bool, str] | None:
-    """Pick the first JSON object out of `text` and extract passed/reason."""
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match is None:
-        return None
-    try:
-        data = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(data, dict) or "passed" not in data:
-        return None
-    return bool(data["passed"]), str(data.get("reason", ""))
+    """Extract the judge's verdict from free-form text.
+
+    Scans for candidate JSON objects from right to left, preferring
+    the last well-formed `{"passed": bool, ...}` object. This is
+    resilient to narration an agentic judge may prepend before its
+    final verdict.
+    """
+    # Collect balanced-brace candidates by scanning backwards.
+    candidates: list[str] = []
+    stack = 0
+    end = -1
+    for i in range(len(text) - 1, -1, -1):
+        ch = text[i]
+        if ch == "}":
+            if stack == 0:
+                end = i
+            stack += 1
+        elif ch == "{":
+            if stack > 0:
+                stack -= 1
+                if stack == 0 and end > i:
+                    candidates.append(text[i:end + 1])
+                    end = -1
+    # `candidates` is in right-to-left order already; try each.
+    for blob in candidates:
+        try:
+            data = json.loads(blob)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and "passed" in data:
+            return bool(data["passed"]), str(data.get("reason", ""))
+    return None
 
 
 def _format_evidence(files: dict[str, str]) -> str:
@@ -151,23 +189,34 @@ async def _default_judge(
     from .agent import run_agent
     from .metrics import Termination
 
+    evidence_hint = _format_evidence(ctx.evidence_files)
+    if evidence_hint:
+        evidence_hint = (
+            "\nThe runner has pre-loaded these file contents as a hint "
+            "(you may still Read any other files yourself):\n"
+            + evidence_hint
+        )
+
     user_msg = (
         f"Rubric:\n{grader.rubric}\n\n"
         f"Original task given to the agent:\n{ctx.case_prompt}\n\n"
         f"Agent's final spoken reply:\n{ctx.agent_final_text}\n"
-        f"{_format_evidence(ctx.evidence_files)}"
+        f"{evidence_hint}\n"
+        "Inspect the working directory as needed, then emit your JSON verdict."
     )
+    tools = (DEFAULT_JUDGE_TOOLS if grader.tools is None
+             else list(grader.tools))
     opts = ClaudeAgentOptions(
         system_prompt=_JUDGE_SYSTEM_PROMPT,
-        allowed_tools=[],
+        allowed_tools=tools,
         cwd=str(cwd),
         # Judge model is independent of the target's model. See
         # DEFAULT_JUDGE_MODEL comment for rationale.
         model=grader.model or DEFAULT_JUDGE_MODEL,
-        max_turns=2,
+        max_turns=grader.max_turns,
         setting_sources=[],
     )
-    res = await run_agent(user_msg, opts, timeout_s=60)
+    res = await run_agent(user_msg, opts, timeout_s=120)
     if res.termination != Termination.completed.value:
         return GradeResult(
             "llm_judge", False,

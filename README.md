@@ -68,12 +68,15 @@ my_suite/
 - `file_exists { path }`
 - `file_contains { path, needle, regex: bool }`
 - `shell { command }` — passes iff exit 0 in the case cwd
-- `llm_judge { rubric, model? }` — a separate Claude call returns JSON
-  `{"passed": bool, "reason": str}`. The judge receives both the
-  agent's spoken reply and a snapshot of text files in the case cwd,
-  so rubrics that talk about produced artifacts (e.g. "is the
-  greeting polite?") can actually read them. Override with
-  `judge_evidence: [file1]` or `judge_evidence: []` on the case.
+- `llm_judge { rubric, model?, tools?, max_turns? }` — a separate
+  Claude *agent* that can use `Read`, `Glob`, and `Grep` (read-only)
+  inside the case cwd to gather its own evidence before returning
+  `{"passed": bool, "reason": str}`. Rubrics that reference produced
+  artifacts (e.g. *"is the greeting polite?"*) are free to inspect
+  any file. A bounded pre-snapshot of cwd text files is embedded in
+  the prompt as a hint; override the hint via `judge_evidence:
+  [file1]` (narrow) or `judge_evidence: []` (none, judge must
+  explore). Override the tool set via `tools: [...]`.
 
 All graders must pass for a case to pass.
 

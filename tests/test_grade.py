@@ -48,6 +48,14 @@ def test_shell_grader_exit_code(tmp_path: Path) -> None:
     ("no json here", None),
     ('{"reason": "no passed key"}', None),
     ("{not valid json}", None),
+    # An agentic judge may narrate before emitting the verdict.
+    ('I read greeting.txt and it says "Hi". Final: {"passed": true, "reason": "warm"}',
+     (True, "warm")),
+    # If there are multiple JSON-like spans, the LAST one with "passed" wins.
+    ('{"passed": false, "reason": "draft"}. Final: {"passed": true, "reason": "ok"}',
+     (True, "ok")),
+    # Nested object without top-level passed -> None.
+    ('{"outer": {"passed": true}}', None),
 ])
 def test_parse_judge_output(text, expected) -> None:
     assert _parse_judge_output(text) == expected
@@ -168,6 +176,58 @@ async def test_judge_prompt_includes_evidence_files(
     assert r.passed is True
     assert "Welcome, Carol!" in captured["prompt"]
     assert "greeting.txt" in captured["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_judge_runs_with_readonly_tools(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """The default judge must be agentic (Read/Glob/Grep), not tool-less."""
+    captured = {}
+
+    async def fake_run_agent(prompt, options, *, timeout_s):
+        captured["tools"] = list(options.allowed_tools)
+        captured["max_turns"] = options.max_turns
+        return type("R", (), {
+            "termination": "completed",
+            "final_text": '{"passed": true}',
+            "error": None,
+        })()
+
+    monkeypatch.setattr("evalbench.agent.run_agent", fake_run_agent)
+    ctx = JudgeContext(case_prompt="p", agent_final_text="Done")
+    await evaluate(LlmJudgeGrader(rubric="r"), tmp_path, context=ctx)
+
+    # No Bash / Write / Edit — judge must not mutate files.
+    assert "Read" in captured["tools"]
+    assert "Glob" in captured["tools"]
+    assert "Grep" in captured["tools"]
+    assert "Bash" not in captured["tools"]
+    assert "Write" not in captured["tools"]
+    assert captured["max_turns"] >= 4  # room to explore
+
+
+@pytest.mark.asyncio
+async def test_judge_tools_can_be_overridden(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    captured = {}
+
+    async def fake_run_agent(prompt, options, *, timeout_s):
+        captured["tools"] = list(options.allowed_tools)
+        return type("R", (), {
+            "termination": "completed",
+            "final_text": '{"passed": true}',
+            "error": None,
+        })()
+
+    monkeypatch.setattr("evalbench.agent.run_agent", fake_run_agent)
+    ctx = JudgeContext(case_prompt="p", agent_final_text="Done")
+    await evaluate(
+        LlmJudgeGrader(rubric="r", tools=[]),  # no-tools override
+        tmp_path, context=ctx,
+    )
+    assert captured["tools"] == []
 
 
 @pytest.mark.asyncio
