@@ -99,10 +99,12 @@ runner or target modules.
    For serious evals, pin the judge model explicitly in the grader
    config and make it at least as strong as the target.
 
-7. **`llm_judge` output parsing is lenient** — `_parse_judge_output`
-   accepts the first JSON object in the reply. If you change the
-   judge system prompt, keep the `{"passed": bool, "reason": str}`
-   contract or update the parser.
+7. **Judge output is schema-validated by the SDK** — `_default_judge`
+   passes `output_format={"type": "json_schema", ...}`, and the grader
+   reads `ResultMessage.structured_output` directly. There is **no
+   regex fallback**: a missing or malformed `structured_output` fails
+   the grader as an infrastructure error, not silently. Don't add a
+   fallback — the contract with the SDK is the contract.
 
 8. **The judge is an agent** — it gets `Read`, `Glob`, `Grep` tools
    scoped to the case cwd (no Bash/Write/Edit, so it can't mutate

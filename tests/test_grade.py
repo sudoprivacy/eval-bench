@@ -13,7 +13,6 @@ from evalbench.grade import (
     JudgeContext,
     LlmJudgeGrader,
     ShellGrader,
-    _parse_judge_output,
     evaluate,
     evaluate_sync,
 )
@@ -39,26 +38,6 @@ def test_file_contains_literal_and_regex(tmp_path: Path) -> None:
 def test_shell_grader_exit_code(tmp_path: Path) -> None:
     assert evaluate_sync(ShellGrader(command="true"), tmp_path).passed
     assert not evaluate_sync(ShellGrader(command="false"), tmp_path).passed
-
-
-@pytest.mark.parametrize("text, expected", [
-    ('{"passed": true, "reason": "ok"}', (True, "ok")),
-    ('prose before {"passed": false, "reason": "nope"} and after', (False, "nope")),
-    ('{"passed": 1, "reason": "truthy"}', (True, "truthy")),
-    ("no json here", None),
-    ('{"reason": "no passed key"}', None),
-    ("{not valid json}", None),
-    # An agentic judge may narrate before emitting the verdict.
-    ('I read greeting.txt and it says "Hi". Final: {"passed": true, "reason": "warm"}',
-     (True, "warm")),
-    # If there are multiple JSON-like spans, the LAST one with "passed" wins.
-    ('{"passed": false, "reason": "draft"}. Final: {"passed": true, "reason": "ok"}',
-     (True, "ok")),
-    # Nested object without top-level passed -> None.
-    ('{"outer": {"passed": true}}', None),
-])
-def test_parse_judge_output(text, expected) -> None:
-    assert _parse_judge_output(text) == expected
 
 
 @pytest.mark.asyncio
@@ -108,6 +87,7 @@ async def test_default_judge_model_is_not_target_model(
             "termination": "completed",
             "final_text": '{"passed": true, "reason": "ok"}',
             "error": None,
+            "structured_output": {"passed": True, "reason": "ok"},
         })()
 
     monkeypatch.setattr(grade_module, "DEFAULT_JUDGE_MODEL", "some-judge-model")
@@ -135,6 +115,7 @@ async def test_per_grader_model_overrides_default(
             "termination": "completed",
             "final_text": '{"passed": false, "reason": "no"}',
             "error": None,
+            "structured_output": {"passed": False, "reason": "no"},
         })()
 
     monkeypatch.setattr(grade_module, "DEFAULT_JUDGE_MODEL", "default-judge")
@@ -162,6 +143,7 @@ async def test_judge_prompt_includes_evidence_files(
             "termination": "completed",
             "final_text": '{"passed": true, "reason": "ok"}',
             "error": None,
+            "structured_output": {"passed": True, "reason": "ok"},
         })()
 
     monkeypatch.setattr("evalbench.agent.run_agent", fake_run_agent)
@@ -192,6 +174,7 @@ async def test_judge_runs_with_readonly_tools(
             "termination": "completed",
             "final_text": '{"passed": true}',
             "error": None,
+            "structured_output": {"passed": True, "reason": ""},
         })()
 
     monkeypatch.setattr("evalbench.agent.run_agent", fake_run_agent)
@@ -219,6 +202,7 @@ async def test_judge_tools_can_be_overridden(
             "termination": "completed",
             "final_text": '{"passed": true}',
             "error": None,
+            "structured_output": {"passed": True, "reason": ""},
         })()
 
     monkeypatch.setattr("evalbench.agent.run_agent", fake_run_agent)
@@ -228,6 +212,55 @@ async def test_judge_tools_can_be_overridden(
         tmp_path, context=ctx,
     )
     assert captured["tools"] == []
+
+
+@pytest.mark.asyncio
+async def test_judge_uses_structured_output_when_available(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """When the SDK returns structured_output, skip regex parsing entirely."""
+    captured = {}
+
+    async def fake_run_agent(prompt, options, *, timeout_s):
+        captured["output_format"] = options.output_format
+        return type("R", (), {
+            "termination": "completed",
+            # Final text is intentionally garbage — should be ignored.
+            "final_text": "I totally rambled instead of emitting JSON",
+            "error": None,
+            "structured_output": {"passed": False, "reason": "schema-enforced"},
+        })()
+
+    monkeypatch.setattr("evalbench.agent.run_agent", fake_run_agent)
+    ctx = JudgeContext(case_prompt="p", agent_final_text="Done")
+    r = await evaluate(LlmJudgeGrader(rubric="r"), tmp_path, context=ctx)
+
+    # Schema is passed to the SDK, and schema-validated output wins.
+    assert captured["output_format"]["type"] == "json_schema"
+    assert "passed" in captured["output_format"]["schema"]["properties"]
+    assert r.passed is False
+    assert "schema-enforced" in r.detail
+
+
+@pytest.mark.asyncio
+async def test_judge_fails_loudly_when_no_structured_output(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """No regex fallback: a missing structured_output is infrastructure
+    failure, not something to paper over."""
+    async def fake_run_agent(prompt, options, *, timeout_s):
+        return type("R", (), {
+            "termination": "completed",
+            "final_text": 'narration with {"passed": true, "reason": "r"}',
+            "error": None,
+            "structured_output": None,
+        })()
+
+    monkeypatch.setattr("evalbench.agent.run_agent", fake_run_agent)
+    ctx = JudgeContext(case_prompt="p", agent_final_text="x")
+    r = await evaluate(LlmJudgeGrader(rubric="r"), tmp_path, context=ctx)
+    assert r.passed is False
+    assert "structured_output" in r.detail
 
 
 @pytest.mark.asyncio
@@ -242,6 +275,7 @@ async def test_judge_prompt_omits_evidence_section_when_empty(
             "termination": "completed",
             "final_text": '{"passed": true}',
             "error": None,
+            "structured_output": {"passed": True, "reason": ""},
         })()
 
     monkeypatch.setattr("evalbench.agent.run_agent", fake_run_agent)

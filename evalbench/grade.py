@@ -7,7 +7,6 @@ routes through the Claude Agent SDK via an injectable callable.
 
 from __future__ import annotations
 
-import json
 import re
 import subprocess
 from dataclasses import dataclass, field as dc_field
@@ -119,12 +118,9 @@ _JUDGE_SYSTEM_PROMPT = (
     "inspect any files the agent produced or modified. Use them as "
     "needed to verify the rubric — do not rely solely on the agent's "
     "spoken reply, which may not reflect the actual artifacts.\n\n"
-    "After gathering sufficient evidence, emit exactly ONE JSON object "
-    "as your final message — no prose before it, no code fences, no "
-    "extra keys:\n"
-    '{"passed": true|false, "reason": "short explanation"}\n\n'
-    "If a rubric condition is not verifiable from the files or the "
-    "spoken reply, return passed=false with the reason."
+    "Your final response must follow the required schema: pass/fail "
+    "plus a concise reason. If a rubric condition is not verifiable "
+    "from the files or spoken reply, return passed=false."
 )
 
 # Default model for llm_judge. We intentionally do NOT fall back to the
@@ -137,40 +133,18 @@ DEFAULT_JUDGE_MODEL = "claude-opus-4-6"
 # Bash (could mutate files and corrupt later graders) and no Write/Edit.
 DEFAULT_JUDGE_TOOLS = ["Read", "Glob", "Grep"]
 
-
-def _parse_judge_output(text: str) -> tuple[bool, str] | None:
-    """Extract the judge's verdict from free-form text.
-
-    Scans for candidate JSON objects from right to left, preferring
-    the last well-formed `{"passed": bool, ...}` object. This is
-    resilient to narration an agentic judge may prepend before its
-    final verdict.
-    """
-    # Collect balanced-brace candidates by scanning backwards.
-    candidates: list[str] = []
-    stack = 0
-    end = -1
-    for i in range(len(text) - 1, -1, -1):
-        ch = text[i]
-        if ch == "}":
-            if stack == 0:
-                end = i
-            stack += 1
-        elif ch == "{":
-            if stack > 0:
-                stack -= 1
-                if stack == 0 and end > i:
-                    candidates.append(text[i:end + 1])
-                    end = -1
-    # `candidates` is in right-to-left order already; try each.
-    for blob in candidates:
-        try:
-            data = json.loads(blob)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(data, dict) and "passed" in data:
-            return bool(data["passed"]), str(data.get("reason", ""))
-    return None
+# JSON schema passed to the SDK's `output_format`. The SDK enforces
+# this CLI-side and returns the parsed object in
+# ResultMessage.structured_output, so we don't regex-scan free text.
+JUDGE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "passed": {"type": "boolean"},
+        "reason": {"type": "string"},
+    },
+    "required": ["passed", "reason"],
+    "additionalProperties": False,
+}
 
 
 def _format_evidence(files: dict[str, str]) -> str:
@@ -215,6 +189,10 @@ async def _default_judge(
         model=grader.model or DEFAULT_JUDGE_MODEL,
         max_turns=grader.max_turns,
         setting_sources=[],
+        # Force the final assistant message to conform to this schema —
+        # the SDK parses it for us and returns the dict in
+        # result.structured_output.
+        output_format={"type": "json_schema", "schema": JUDGE_OUTPUT_SCHEMA},
     )
     res = await run_agent(user_msg, opts, timeout_s=120)
     if res.termination != Termination.completed.value:
@@ -222,12 +200,19 @@ async def _default_judge(
             "llm_judge", False,
             f"judge {res.termination}: {(res.error or '').strip()}",
         )
-    parsed = _parse_judge_output(res.final_text)
-    if parsed is None:
-        preview = res.final_text[:160].replace("\n", " ")
-        return GradeResult("llm_judge", False, f"unparseable judge output: {preview!r}")
-    passed, reason = parsed
-    return GradeResult("llm_judge", passed, reason[:200])
+
+    # The SDK's json_schema enforcement gives us a validated dict.
+    # Anything else is a judge-infrastructure failure, not a grader
+    # result — surface it explicitly.
+    out = res.structured_output
+    if not isinstance(out, dict) or "passed" not in out:
+        return GradeResult(
+            "llm_judge", False,
+            f"judge returned no structured_output: {type(out).__name__}",
+        )
+    return GradeResult(
+        "llm_judge", bool(out["passed"]), str(out.get("reason", ""))[:200],
+    )
 
 
 async def evaluate(

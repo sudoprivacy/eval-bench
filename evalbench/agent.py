@@ -44,6 +44,11 @@ class AgentRunResult:
     wall_ms: int = 0
     rate_limited: bool = False
     transcript: list[dict[str, Any]] = field(default_factory=list)
+    # Populated from ResultMessage.structured_output when the caller
+    # passed `output_format={"type": "json_schema", ...}`. The SDK
+    # validates against the schema CLI-side, so this is the authoritative
+    # machine-readable verdict (no regex parsing needed).
+    structured_output: Any = None
 
 
 def _extract_usage(usage: dict | None) -> TokenUsage:
@@ -143,6 +148,7 @@ async def _drive(prompt: str, options: ClaudeAgentOptions) -> AgentRunResult:
                     result.tokens = _extract_usage(msg.usage)
                     result.cost_usd = msg.total_cost_usd
                     result.final_text = msg.result or ""
+                    result.structured_output = msg.structured_output
                     subtype = msg.subtype or ""
                     if subtype == "success":
                         result.termination = Termination.completed.value
