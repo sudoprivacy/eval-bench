@@ -12,6 +12,7 @@ import click
 
 from . import __version__
 from .config import load_suite
+from .report import write_report
 from .runner import run_suite
 
 
@@ -96,14 +97,17 @@ async def _run_async(
         on_result=_on_result,
     )
 
+    report_path = write_report(run_dir)
     click.echo(f"\n{counter['ok']}/{total} passed → {results_path}")
+    click.echo(f"report → {report_path}")
 
 
 @main.command()
 @click.argument("run_dir", type=click.Path(exists=True, file_okay=False))
 def report(run_dir: str) -> None:
     """Render a markdown report from a run's results.jsonl."""
-    click.echo(f"[stub] report run={run_dir}")
+    path = write_report(Path(run_dir))
+    click.echo(f"wrote {path}")
 
 
 @main.command()
