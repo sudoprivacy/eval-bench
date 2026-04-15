@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import fnmatch
 import json
 import shutil
 import subprocess
@@ -133,3 +135,58 @@ def append_jsonl(path: Path, result: CaseResult) -> None:
     with path.open("a") as f:
         json.dump(result.to_dict(), f, default=str)
         f.write("\n")
+
+
+ResultHook = Callable[[CaseResult], None]
+
+
+async def run_suite(
+    suite: Suite,
+    results_path: Path,
+    *,
+    filter_glob: str | None = None,
+    keep_failed: bool = False,
+    agent_fn: AgentFn | None = None,
+    judge_fn: JudgeFn | None = None,
+    on_result: ResultHook | None = None,
+) -> list[CaseResult]:
+    """Execute every (case, trial) pair with bounded concurrency.
+
+    Writes each result to `results_path` as a JSON line as soon as it
+    completes, behind an asyncio lock so concurrent appends don't
+    interleave. `on_result` fires from inside the same lock, which
+    makes it safe to use for ordered progress printing.
+    """
+    cases = [
+        c for c in suite.cases
+        if not filter_glob or fnmatch.fnmatch(c.id, filter_glob)
+    ]
+    if not cases:
+        return []
+
+    sem = asyncio.Semaphore(suite.run.concurrency)
+    write_lock = asyncio.Lock()
+    results: list[CaseResult] = []
+
+    async def _one(case: Case, trial: int) -> CaseResult:
+        async with sem:
+            result = await run_case_trial(
+                case, suite, trial,
+                keep_failed=keep_failed,
+                agent_fn=agent_fn,
+                judge_fn=judge_fn,
+            )
+        async with write_lock:
+            append_jsonl(results_path, result)
+            results.append(result)
+            if on_result is not None:
+                on_result(result)
+        return result
+
+    tasks = [
+        _one(case, trial)
+        for case in cases
+        for trial in range(1, suite.run.trials + 1)
+    ]
+    await asyncio.gather(*tasks)
+    return results

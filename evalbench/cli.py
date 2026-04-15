@@ -12,7 +12,7 @@ import click
 
 from . import __version__
 from .config import load_suite
-from .runner import append_jsonl, run_case_trial
+from .runner import run_suite
 
 
 @click.group()
@@ -76,25 +76,27 @@ async def _run_async(
         "started_at": stamp,
     }, indent=2))
 
-    n_ok = n_total = 0
-    # Sequential for now; step 6 adds parallelism.
-    for case in cases:
-        for trial in range(1, suite.run.trials + 1):
-            click.echo(f"→ {case.id} trial {trial}/{suite.run.trials} ...")
-            result = await run_case_trial(
-                case, suite, trial, keep_failed=keep_failed,
-            )
-            append_jsonl(results_path, result)
-            n_total += 1
-            n_ok += int(result.passed)
-            tag = "PASS" if result.passed else "FAIL"
-            extra = f" [{result.termination}]" if result.termination != "completed" else ""
-            click.echo(
-                f"  {tag}{extra} turns={result.turns} "
-                f"tools={result.tool_calls} wall_ms={result.wall_ms}"
-            )
+    total = len(cases) * suite.run.trials
+    counter = {"done": 0, "ok": 0}
 
-    click.echo(f"\n{n_ok}/{n_total} passed → {results_path}")
+    def _on_result(result) -> None:  # type: ignore[no-untyped-def]
+        counter["done"] += 1
+        counter["ok"] += int(result.passed)
+        tag = "PASS" if result.passed else "FAIL"
+        extra = f" [{result.termination}]" if result.termination != "completed" else ""
+        click.echo(
+            f"[{counter['done']:>3}/{total}] {tag}{extra} {result.case_id} "
+            f"t{result.trial} turns={result.turns} tools={result.tool_calls} "
+            f"wall_ms={result.wall_ms}"
+        )
+
+    await run_suite(
+        suite, results_path,
+        filter_glob=filter_glob, keep_failed=keep_failed,
+        on_result=_on_result,
+    )
+
+    click.echo(f"\n{counter['ok']}/{total} passed → {results_path}")
 
 
 @main.command()
