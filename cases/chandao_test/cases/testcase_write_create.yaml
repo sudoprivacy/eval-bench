@@ -1,0 +1,43 @@
+id: testcase_write_create
+prompt: |
+  Create a new chandao test case under product id 7 titled
+  "EvalBench testcase sentinel". After it's created, write the
+  test case's numeric id (as returned by the API) to a file
+  called `testcase_id.txt` — just the id. Consult the skill for
+  required fields (type, pri, steps) and recover from HTTP 400s
+  by reading the error hint.
+setup:
+  - |
+    chandao testcase list --product=7 2>/dev/null | python -c "
+    import json, sys, subprocess
+    d = json.loads(sys.stdin.read())
+    for c in (d.get('data', {}) or {}).get('testcases', []) or []:
+        if c.get('title') == 'EvalBench testcase sentinel':
+            subprocess.run(['chandao', 'testcase', 'delete', str(c['id'])],
+                           check=False)
+    " || true
+limits:
+  max_turns: 16
+  timeout_s: 180
+grade:
+  - type: file_exists
+    path: testcase_id.txt
+  - type: shell
+    command: "grep -Eq '^[1-9][0-9]*$' testcase_id.txt"
+  - type: shell
+    command: |
+      id=$(cat testcase_id.txt)
+      chandao testcase get "$id" | python -c "
+      import json, sys
+      d = json.loads(sys.stdin.read())
+      assert d.get('ok'), d
+      title = (d.get('data') or {}).get('title')
+      assert title == 'EvalBench testcase sentinel', f'title was {title!r}'
+      "
+  - type: llm_judge
+    rubric: |
+      The agent must have called `chandao testcase create --product=7
+      --title="EvalBench testcase sentinel" --type=... --pri=... -F steps=...`
+      (or equivalent), parsed the returned JSON, and written the id
+      to testcase_id.txt. Fabricating an id without a successful
+      create is a fail.

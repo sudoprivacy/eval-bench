@@ -1,0 +1,25 @@
+id: project_read_list
+prompt: |
+  List all projects in chandao. Write a short answer to a file
+  called `answer.txt` in the current working directory saying how
+  many projects exist and listing their names (or noting the list
+  is empty). Keep it to 3 sentences max.
+limits:
+  max_turns: 12
+  timeout_s: 120
+grade:
+  - type: file_exists
+    path: answer.txt
+  - type: llm_judge
+    tools: [Read, Glob, Grep, Bash]
+    rubric: |
+      You are verifying an agent's project-list summary.
+
+      Step 1: Run `chandao project list` yourself (Bash). Count
+              data.projects.
+      Step 2: Read answer.txt and compare.
+
+      Pass iff:
+      - answer.txt's reported count matches the real API count.
+      - answer.txt does not invent projects.
+      - answer.txt is concise (3 sentences max).

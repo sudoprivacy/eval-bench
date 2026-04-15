@@ -1,0 +1,48 @@
+id: story_write_create
+prompt: |
+  Create a new chandao story under product id 7 with the title
+  "EvalBench story sentinel". After it's created, write the
+  story's numeric id (as returned by the API) to a file called
+  `story_id.txt` in the current working directory — just the id,
+  nothing else. Consult the skill for any required fields and
+  recover from HTTP 400s by reading the error hint.
+# Idempotent: delete any leftover sentinel story so the agent
+# exercises the real create path, not duplicate recovery.
+setup:
+  - |
+    chandao story list --product=7 2>/dev/null | python -c "
+    import json, sys, subprocess
+    d = json.loads(sys.stdin.read())
+    for s in (d.get('data', {}) or {}).get('stories', []) or []:
+        if s.get('title') == 'EvalBench story sentinel':
+            subprocess.run(['chandao', 'story', 'delete', str(s['id'])],
+                           check=False)
+    " || true
+limits:
+  max_turns: 16
+  timeout_s: 180
+grade:
+  - type: file_exists
+    path: story_id.txt
+  - type: shell
+    command: "grep -Eq '^[1-9][0-9]*$' story_id.txt"
+  # Server-side truth: the story must exist and carry the sentinel title.
+  - type: shell
+    command: |
+      id=$(cat story_id.txt)
+      chandao story get "$id" | python -c "
+      import json, sys
+      d = json.loads(sys.stdin.read())
+      assert d.get('ok'), d
+      title = (d.get('data') or {}).get('title')
+      assert title == 'EvalBench story sentinel', f'title was {title!r}'
+      "
+  - type: llm_judge
+    rubric: |
+      The agent must have called `chandao story create --product=7
+      --title="EvalBench story sentinel" ...` (the CLI requires
+      additional fields like --spec, --pri, --category — the agent
+      is expected to discover these from error hints or --help and
+      recover). It must then have parsed the resulting JSON and
+      written the returned id to story_id.txt. Fabricating an id
+      without a successful create is a fail.

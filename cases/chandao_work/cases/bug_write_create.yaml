@@ -1,0 +1,42 @@
+id: bug_write_create
+prompt: |
+  Create a new chandao bug under product id 7 titled "EvalBench bug
+  sentinel". After it's created, write the bug's numeric id (as
+  returned by the API) to a file called `bug_id.txt` — just the id.
+  Consult the skill for required fields (openedBuild etc.) and
+  recover from HTTP 400s by reading the error hint.
+setup:
+  - |
+    chandao bug list --product=7 2>/dev/null | python -c "
+    import json, sys, subprocess
+    d = json.loads(sys.stdin.read())
+    for b in (d.get('data', {}) or {}).get('bugs', []) or []:
+        if b.get('title') == 'EvalBench bug sentinel':
+            subprocess.run(['chandao', 'bug', 'delete', str(b['id'])],
+                           check=False)
+    " || true
+limits:
+  max_turns: 16
+  timeout_s: 180
+grade:
+  - type: file_exists
+    path: bug_id.txt
+  - type: shell
+    command: "grep -Eq '^[1-9][0-9]*$' bug_id.txt"
+  - type: shell
+    command: |
+      id=$(cat bug_id.txt)
+      chandao bug get "$id" | python -c "
+      import json, sys
+      d = json.loads(sys.stdin.read())
+      assert d.get('ok'), d
+      title = (d.get('data') or {}).get('title')
+      assert title == 'EvalBench bug sentinel', f'title was {title!r}'
+      "
+  - type: llm_judge
+    rubric: |
+      The agent must have called `chandao bug create --product=7
+      --title="EvalBench bug sentinel" --openedBuild=trunk ...`
+      with the other fields the CLI requires (--pri, --severity),
+      parsed the resulting JSON, and written the id to bug_id.txt.
+      Fabricating an id without a successful create is a fail.
