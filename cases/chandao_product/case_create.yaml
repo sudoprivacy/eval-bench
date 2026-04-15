@@ -1,0 +1,46 @@
+id: product-create
+prompt: |
+  Create a new chandao product named "EvalBench Sandbox" with code
+  `evalbench-sandbox`. After it's created, write the product's numeric
+  id (as returned by the API) to a file called `product_id.txt` in
+  the current working directory — just the id, nothing else.
+# Start from a known state: delete any leftover "EvalBench Sandbox"
+# from previous runs so `product create` exercises the real create path,
+# not the duplicate-recovery path.
+setup:
+  - |
+    chandao product list 2>/dev/null | python -c "
+    import json, os, sys, subprocess
+    d = json.loads(sys.stdin.read())
+    for p in (d.get('data', {}) or {}).get('products', []) or []:
+        if p.get('name') == 'EvalBench Sandbox':
+            subprocess.run(['chandao', 'product', 'delete', str(p['id'])],
+                           check=False)
+    " || true
+limits:
+  max_turns: 12
+  timeout_s: 120
+grade:
+  - type: file_exists
+    path: product_id.txt
+  # The id should parse as a positive integer.
+  - type: shell
+    command: "grep -Eq '^[1-9][0-9]*$' product_id.txt"
+  # And the product must actually exist on the server with that id.
+  # `product get` returns the product flat under `data`, not data.product.
+  - type: shell
+    command: |
+      id=$(cat product_id.txt)
+      chandao product get "$id" | python -c "
+      import json, sys
+      d = json.loads(sys.stdin.read())
+      assert d.get('ok'), d
+      name = (d.get('data') or {}).get('name')
+      assert name == 'EvalBench Sandbox', f'name was {name!r}'
+      "
+  - type: llm_judge
+    rubric: |
+      The agent must have called `chandao product create` with
+      `--name="EvalBench Sandbox"` and `--code=evalbench-sandbox`,
+      parsed the resulting JSON, and written the returned id (a
+      positive integer) to product_id.txt.

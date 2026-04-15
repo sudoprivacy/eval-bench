@@ -37,6 +37,8 @@ def test_build_options_skill_reads_skill_md(tmp_path: Path) -> None:
     assert opts.max_turns == 7
     # Eval runs are hermetic by default — no user/project settings leak in.
     assert opts.setting_sources == []
+    # Case cwd is on PATH so shims can be dropped in and called directly.
+    assert opts.env["PATH"].startswith(str(cwd) + ":")
 
 
 def test_build_options_skill_missing_dir(tmp_path: Path) -> None:

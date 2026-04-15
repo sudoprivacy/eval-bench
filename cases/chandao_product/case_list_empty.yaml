@@ -1,0 +1,27 @@
+id: product-list
+prompt: |
+  List all products in chandao. Write a short answer to a file called
+  `answer.txt` in the current working directory saying how many
+  products exist and listing their names (or noting the list is empty).
+  Keep it to 3 sentences max.
+limits:
+  max_turns: 12
+  timeout_s: 120
+grade:
+  - type: file_exists
+    path: answer.txt
+  - type: llm_judge
+    # Bash so the judge can call chandao itself to establish ground truth.
+    tools: [Read, Glob, Grep, Bash]
+    rubric: |
+      You are verifying an agent's product-list summary.
+
+      Step 1: Run `chandao product list` yourself to see what the API
+              actually returns (use your Bash tool). Count data.products.
+      Step 2: Read answer.txt and compare.
+
+      Pass the case iff:
+      - answer.txt's reported count matches the real API count.
+      - answer.txt does not invent products that aren't in the API
+        response.
+      - answer.txt is concise (3 sentences max).

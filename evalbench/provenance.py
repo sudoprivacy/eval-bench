@@ -9,6 +9,7 @@ is self-describing months later.
 from __future__ import annotations
 
 import hashlib
+import os
 import platform
 import subprocess
 import sys
@@ -79,6 +80,10 @@ def collect_static(suite: Suite) -> dict[str, Any]:
         "platform": platform.platform(),
         "sdk_version": getattr(claude_agent_sdk, "__version__", None),
         "claude_cli_version": _claude_cli_version(),
+        # "api_key" when billed per token; "subscription" when the
+        # `claude` CLI is OAuth-logged-in to a Pro/Max plan. Affects
+        # how `cost_usd` should be interpreted in reports.
+        "auth_mode": "api_key" if os.environ.get("ANTHROPIC_API_KEY") else "subscription",
         "target": _target_hash(suite),
         "case_hashes": _case_hashes(suite),
     }

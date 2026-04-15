@@ -1,0 +1,16 @@
+target:
+  type: skill
+  path: /home/user/chandao-cli/skills/chandao-product
+  # The product skill MUSTs read its sibling chandao-shared skill.
+  # Expose that directory too so Read works.
+  extra_add_dirs:
+    - /home/user/chandao-cli/skills/chandao-shared
+  allowed_tools:
+    - Read
+    - Write
+    - Bash
+    - Glob
+    - Grep
+run:
+  concurrency: 1     # real server, keep it gentle
+  trials: 1

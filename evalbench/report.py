@@ -106,10 +106,22 @@ def render_markdown(run: RunData) -> str:
                  f"cache_read {s['tokens_cache_read']}, "
                  f"cache_create {s['tokens_cache_create']}")
     lines.append(f"- Tool calls (total): {s['tool_calls_total']}")
-    if s["total_cost_usd"] is not None:
-        lines.append(f"- Cost (sum of reported): ${s['total_cost_usd']:.4f}")
+    cost = s["total_cost_usd"]
+    auth_mode = (meta.get("provenance") or {}).get("auth_mode")
+    if cost is None:
+        lines.append("- Cost: n/a")
+    elif auth_mode == "subscription":
+        lines.append(
+            f"- Cost: ~${cost:.4f} (list-price equivalent, not billed — "
+            f"subscription auth)"
+        )
+    elif auth_mode == "api_key":
+        lines.append(f"- Cost (billed): ${cost:.4f}")
     else:
-        lines.append("- Cost: n/a (subscription auth)")
+        # Unknown auth (old runs without provenance) — be honest about it.
+        lines.append(
+            f"- Cost: ~${cost:.4f} (auth mode unknown; SDK-reported)"
+        )
     if s["terminations"]:
         parts = ", ".join(f"{k}={v}" for k, v in sorted(s["terminations"].items()))
         lines.append(f"- Terminations: {parts}")

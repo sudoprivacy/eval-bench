@@ -38,11 +38,22 @@ def test_collect_static_prompt_target(tmp_path: Path) -> None:
     assert info["sdk_version"]
     assert info["python_version"]
     assert info["platform"]
+    assert info["auth_mode"] in {"api_key", "subscription"}
     assert info["target"]["kind"] == "prompt"
     assert len(info["target"]["system_prompt_sha256"]) == 64
     assert set(info["case_hashes"]) == {"a", "b"}
     # All hashes are 64-char hex.
     assert all(len(h) == 64 for h in info["case_hashes"].values())
+
+
+def test_auth_mode_follows_anthropic_api_key(monkeypatch, tmp_path: Path) -> None:
+    suite = load_suite(_write_suite(tmp_path, target_kind="prompt"))
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    assert collect_static(suite)["auth_mode"] == "api_key"
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert collect_static(suite)["auth_mode"] == "subscription"
 
 
 def test_collect_static_skill_target_hashes_skill_md(tmp_path: Path) -> None:

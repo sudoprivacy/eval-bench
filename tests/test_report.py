@@ -69,13 +69,33 @@ def test_load_run_without_meta(tmp_path: Path) -> None:
     assert len(run.results) == 1
 
 
-def test_subscription_cost_note(tmp_path: Path) -> None:
+def test_cost_na_when_none(tmp_path: Path) -> None:
     _write_run(tmp_path, [_row(cost_usd=None)])
     md = render_markdown(load_run(tmp_path))
-    assert "subscription auth" in md
+    assert "Cost: n/a" in md
 
 
-def test_cost_shown_when_present(tmp_path: Path) -> None:
-    _write_run(tmp_path, [_row(cost_usd=0.01), _row(cost_usd=0.02)])
+def test_cost_labeled_as_list_price_on_subscription(tmp_path: Path) -> None:
+    _write_run(tmp_path, [_row(cost_usd=0.01), _row(cost_usd=0.02)],
+               meta={"provenance": {"auth_mode": "subscription"}})
     md = render_markdown(load_run(tmp_path))
     assert "$0.0300" in md
+    assert "list-price equivalent" in md
+    assert "subscription" in md
+    # Should NOT claim this was billed.
+    assert "Cost (billed)" not in md
+
+
+def test_cost_labeled_as_billed_on_api_key(tmp_path: Path) -> None:
+    _write_run(tmp_path, [_row(cost_usd=0.05)],
+               meta={"provenance": {"auth_mode": "api_key"}})
+    md = render_markdown(load_run(tmp_path))
+    assert "Cost (billed): $0.0500" in md
+    assert "list-price" not in md
+
+
+def test_cost_labeled_unknown_when_auth_mode_missing(tmp_path: Path) -> None:
+    _write_run(tmp_path, [_row(cost_usd=0.05)])  # no meta / no provenance
+    md = render_markdown(load_run(tmp_path))
+    assert "$0.0500" in md
+    assert "auth mode unknown" in md
