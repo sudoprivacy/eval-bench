@@ -68,6 +68,81 @@ def _count_rate_limit_attempts(transcript: list[dict]) -> int:
     return sum(1 for e in transcript if e.get("kind") == "retry_marker")
 
 
+# Bounds for auto-discovered judge evidence. Prevent a runaway case from
+# stuffing the judge with megabytes of output.
+_EVIDENCE_MAX_FILES = 8
+_EVIDENCE_MAX_BYTES_PER_FILE = 64 * 1024
+_EVIDENCE_MAX_TOTAL_BYTES = 256 * 1024
+
+
+def _read_text_bounded(path: Path) -> str | None:
+    """Return path's contents as text, truncated, or None if not decodable."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    truncated = False
+    if len(data) > _EVIDENCE_MAX_BYTES_PER_FILE:
+        data = data[:_EVIDENCE_MAX_BYTES_PER_FILE]
+        truncated = True
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if truncated:
+        text += "\n... (truncated)"
+    return text
+
+
+def _collect_evidence(case: Case, cwd: Path) -> dict[str, str]:
+    """Gather files from cwd to include in the llm_judge prompt.
+
+    Behavior:
+      - `case.judge_evidence is None`  → auto-discover non-hidden text
+        files in cwd, bounded by size and count.
+      - `case.judge_evidence == []`    → no files; judge sees only the
+        agent's spoken reply.
+      - explicit list                   → read exactly those files.
+    """
+    if case.judge_evidence is not None:
+        out: dict[str, str] = {}
+        for name in case.judge_evidence:
+            path = (cwd / name).resolve()
+            # Guard: don't read outside cwd even if the case asks for it.
+            try:
+                path.relative_to(cwd.resolve())
+            except ValueError:
+                continue
+            if not path.is_file():
+                continue
+            text = _read_text_bounded(path)
+            if text is not None:
+                out[name] = text
+        return out
+
+    # Auto-discover (non-recursive; keep it simple).
+    out = {}
+    total = 0
+    try:
+        entries = sorted(
+            p for p in cwd.iterdir()
+            if p.is_file() and not p.name.startswith(".")
+        )
+    except OSError:
+        return out
+    for path in entries:
+        if len(out) >= _EVIDENCE_MAX_FILES:
+            break
+        text = _read_text_bounded(path)
+        if text is None:
+            continue  # skip binaries silently in auto mode
+        if total + len(text) > _EVIDENCE_MAX_TOTAL_BYTES:
+            break
+        out[path.name] = text
+        total += len(text)
+    return out
+
+
 def _write_transcript(dir_: Path, case_id: str, trial: int,
                       transcript: list[dict]) -> Path:
     dir_.mkdir(parents=True, exist_ok=True)
@@ -124,6 +199,7 @@ async def run_case_trial(
             case_prompt=case.prompt,
             agent_final_text=agent.final_text,
             model=suite.run.model,
+            evidence_files=_collect_evidence(case, cwd),
         )
         grades = await _grade_case(case, cwd, judge_ctx, judge_fn)
         passed = (

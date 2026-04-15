@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 from typing import Annotated, Awaitable, Callable, Literal, Union
 
@@ -96,6 +96,11 @@ class JudgeContext:
     case_prompt: str
     agent_final_text: str
     model: str | None = None
+    # name -> contents of any files produced/modified by the agent in
+    # the case cwd. Populated by the runner. Judge prompts embed these
+    # verbatim so a rubric like "is the greeting warm?" can actually
+    # read the greeting instead of only the agent's spoken reply.
+    evidence_files: dict[str, str] = dc_field(default_factory=dict)
 
 
 JudgeFn = Callable[["LlmJudgeGrader", Path, JudgeContext], Awaitable[GradeResult]]
@@ -130,6 +135,15 @@ def _parse_judge_output(text: str) -> tuple[bool, str] | None:
     return bool(data["passed"]), str(data.get("reason", ""))
 
 
+def _format_evidence(files: dict[str, str]) -> str:
+    if not files:
+        return ""
+    parts = ["\nFiles in the working directory after the agent ran:"]
+    for name, content in files.items():
+        parts.append(f"\n--- file: {name} ---\n{content}\n--- end {name} ---")
+    return "\n".join(parts) + "\n"
+
+
 async def _default_judge(
     grader: "LlmJudgeGrader", cwd: Path, ctx: JudgeContext,
 ) -> GradeResult:
@@ -140,7 +154,8 @@ async def _default_judge(
     user_msg = (
         f"Rubric:\n{grader.rubric}\n\n"
         f"Original task given to the agent:\n{ctx.case_prompt}\n\n"
-        f"Agent's final output:\n{ctx.agent_final_text}\n"
+        f"Agent's final spoken reply:\n{ctx.agent_final_text}\n"
+        f"{_format_evidence(ctx.evidence_files)}"
     )
     opts = ClaudeAgentOptions(
         system_prompt=_JUDGE_SYSTEM_PROMPT,

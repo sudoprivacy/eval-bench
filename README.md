@@ -69,7 +69,11 @@ my_suite/
 - `file_contains { path, needle, regex: bool }`
 - `shell { command }` — passes iff exit 0 in the case cwd
 - `llm_judge { rubric, model? }` — a separate Claude call returns JSON
-  `{"passed": bool, "reason": str}`
+  `{"passed": bool, "reason": str}`. The judge receives both the
+  agent's spoken reply and a snapshot of text files in the case cwd,
+  so rubrics that talk about produced artifacts (e.g. "is the
+  greeting polite?") can actually read them. Override with
+  `judge_evidence: [file1]` or `judge_evidence: []` on the case.
 
 All graders must pass for a case to pass.
 

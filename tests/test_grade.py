@@ -139,3 +139,54 @@ async def test_per_grader_model_overrides_default(
     )
     assert r.passed is False
     assert captured["model"] == "explicit-judge"
+
+
+@pytest.mark.asyncio
+async def test_judge_prompt_includes_evidence_files(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Evidence files must be embedded verbatim in the judge prompt."""
+    captured = {}
+
+    async def fake_run_agent(prompt, options, *, timeout_s):
+        captured["prompt"] = prompt
+        return type("R", (), {
+            "termination": "completed",
+            "final_text": '{"passed": true, "reason": "ok"}',
+            "error": None,
+        })()
+
+    monkeypatch.setattr("evalbench.agent.run_agent", fake_run_agent)
+
+    ctx = JudgeContext(
+        case_prompt="greet Carol",
+        agent_final_text="Done!",
+        evidence_files={"greeting.txt": "Welcome, Carol!"},
+    )
+    r = await evaluate(LlmJudgeGrader(rubric="is it warm?"),
+                       tmp_path, context=ctx)
+    assert r.passed is True
+    assert "Welcome, Carol!" in captured["prompt"]
+    assert "greeting.txt" in captured["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_judge_prompt_omits_evidence_section_when_empty(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    captured = {}
+
+    async def fake_run_agent(prompt, options, *, timeout_s):
+        captured["prompt"] = prompt
+        return type("R", (), {
+            "termination": "completed",
+            "final_text": '{"passed": true}',
+            "error": None,
+        })()
+
+    monkeypatch.setattr("evalbench.agent.run_agent", fake_run_agent)
+
+    ctx = JudgeContext(case_prompt="p", agent_final_text="Done!",
+                       evidence_files={})
+    await evaluate(LlmJudgeGrader(rubric="r"), tmp_path, context=ctx)
+    assert "Files in the working directory" not in captured["prompt"]

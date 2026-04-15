@@ -104,6 +104,16 @@ runner or target modules.
    judge system prompt, keep the `{"passed": bool, "reason": str}`
    contract or update the parser.
 
+8. **Judge evidence is auto-collected from cwd** — after the agent
+   runs, `runner._collect_evidence` snapshots text files from the
+   case cwd (bounded: 8 files, 64 KiB each, 256 KiB total) and the
+   judge prompt embeds them verbatim. This means a judge rubric that
+   asks "is the greeting polite?" actually reads `greeting.txt`
+   instead of only the agent's spoken reply. Cases can override via
+   `judge_evidence: [file1, file2]` (explicit list) or
+   `judge_evidence: []` (no evidence). Path traversal outside cwd is
+   rejected even for explicit lists.
+
 ## Conventions
 
 - **Python 3.11+**, `from __future__ import annotations` everywhere.
