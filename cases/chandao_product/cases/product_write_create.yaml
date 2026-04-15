@@ -1,4 +1,4 @@
-id: product-create
+id: product_write_create
 prompt: |
   Create a new chandao product named "EvalBench Sandbox" with code
   `evalbench-sandbox`. After it's created, write the product's numeric

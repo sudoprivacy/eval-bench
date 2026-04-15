@@ -1,0 +1,65 @@
+id: product_write_update_name
+prompt: |
+  There is an existing chandao product with id written in
+  `product_id.txt` in the current working directory. Rename it from
+  its current name to "EvalBench Sandbox (renamed)" using the
+  `chandao product update` command. After the update succeeds, write
+  the product's final name (as returned by a follow-up `chandao
+  product get`) to a file called `final_name.txt` — just the name,
+  nothing else, no quotes, no trailing newline required.
+# Seed: make sure the sentinel product exists and its id is in
+# product_id.txt so the agent has something concrete to update.
+# Idempotent: delete any leftover with either the pre- or post-
+# rename name first, then create fresh.
+setup:
+  - |
+    chandao product list 2>/dev/null | python -c "
+    import json, sys, subprocess
+    d = json.loads(sys.stdin.read())
+    stale = {'EvalBench Sandbox', 'EvalBench Sandbox (renamed)'}
+    for p in (d.get('data', {}) or {}).get('products', []) or []:
+        if p.get('name') in stale:
+            subprocess.run(['chandao', 'product', 'delete', str(p['id'])],
+                           check=False)
+    " || true
+  - |
+    chandao product create --name="EvalBench Sandbox" \
+        --code=evalbench-sandbox | python -c "
+    import json, sys
+    d = json.loads(sys.stdin.read())
+    assert d.get('ok'), d
+    pid = (d.get('data') or {}).get('id')
+    assert pid, d
+    open('product_id.txt', 'w').write(str(pid))
+    "
+limits:
+  max_turns: 12
+  timeout_s: 120
+grade:
+  - type: file_exists
+    path: final_name.txt
+  # final_name.txt must literally equal the renamed value.
+  - type: shell
+    command: |
+      got=$(cat final_name.txt | tr -d '\n')
+      test "$got" = "EvalBench Sandbox (renamed)"
+  # And the server's view of the product must agree — catches the
+  # case where the agent writes the intended name to the file but
+  # never actually called `product update`.
+  - type: shell
+    command: |
+      id=$(cat product_id.txt)
+      chandao product get "$id" | python -c "
+      import json, sys
+      d = json.loads(sys.stdin.read())
+      assert d.get('ok'), d
+      name = (d.get('data') or {}).get('name')
+      assert name == 'EvalBench Sandbox (renamed)', f'name was {name!r}'
+      "
+  - type: llm_judge
+    rubric: |
+      The agent must have called `chandao product update <id>` with
+      the new name, then verified via `chandao product get <id>` (or
+      equivalent), and written the server-reported name to
+      final_name.txt. It must NOT have made up the name without
+      calling update.

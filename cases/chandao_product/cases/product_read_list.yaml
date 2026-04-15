@@ -1,4 +1,4 @@
-id: product-list
+id: product_read_list
 prompt: |
   List all products in chandao. Write a short answer to a file called
   `answer.txt` in the current working directory saying how many

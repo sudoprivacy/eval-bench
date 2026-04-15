@@ -1,0 +1,49 @@
+id: product_write_delete_roundtrip
+prompt: |
+  Create a scratch chandao product named "EvalBench Delete Me"
+  with code `evalbench-delete-me`, then delete it using `chandao
+  product delete <id>`. After deletion, verify the product no
+  longer exists (a follow-up `chandao product list` must not list
+  it) and write "deleted" to a file called `status.txt` — just that
+  one word.
+# Idempotent seed: clear any leftover sentinel from a previous run.
+setup:
+  - |
+    chandao product list 2>/dev/null | python -c "
+    import json, sys, subprocess
+    d = json.loads(sys.stdin.read())
+    for p in (d.get('data', {}) or {}).get('products', []) or []:
+        if p.get('name') == 'EvalBench Delete Me':
+            subprocess.run(['chandao', 'product', 'delete', str(p['id'])],
+                           check=False)
+    " || true
+limits:
+  max_turns: 16
+  timeout_s: 180
+grade:
+  - type: file_exists
+    path: status.txt
+  - type: shell
+    command: |
+      got=$(cat status.txt | tr -d '\n')
+      test "$got" = "deleted"
+  # Server-side truth: the sentinel name must not appear in `product list`.
+  - type: shell
+    command: |
+      chandao product list | python -c "
+      import json, sys
+      d = json.loads(sys.stdin.read())
+      assert d.get('ok'), d
+      names = [p.get('name') for p in
+               (d.get('data') or {}).get('products', []) or []]
+      assert 'EvalBench Delete Me' not in names, names
+      "
+  - type: llm_judge
+    rubric: |
+      The agent must have executed the full round-trip against the
+      real CLI: `chandao product create --name=... --code=...`,
+      captured the returned id, then `chandao product delete <id>`,
+      then verified absence via `chandao product list`. A pass
+      requires evidence in the transcript of ALL three calls
+      (create, delete, list-verify). Writing "deleted" to status.txt
+      without actually calling delete is a fail.
