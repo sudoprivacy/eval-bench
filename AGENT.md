@@ -195,14 +195,37 @@ manually and inspect `results.jsonl`. A two-case suite is ~$0.10.
 
 ## Open robustness gaps (as of this writing)
 
-Tracked in discussion, not yet code:
+Done:
 
-1. Subprocess cleanup on timeout/cancel (orphan `claude` processes).
-2. Rate-limit backoff + adaptive concurrency.
-3. Model pinning + provenance (SKILL.md hash, SDK version) in `meta.json`.
-4. Per-case transcripts (`transcript.jsonl`) for failure debugging.
-5. JSONL `schema_version` + lenient loader.
-6. `HOME` isolation per case.
-7. Separate judge-model from target-model by default.
-8. Suite-level budget caps (`max_cost_usd`, `max_wall_s`).
-9. `evalbench debug <suite> <case-id>` for one-case verbose mode.
+- ✅ Subprocess cleanup on timeout/cancel — `ClaudeSDKClient` used as async
+  context manager so the `claude` subprocess is disconnected on exit
+  (`agent.py::_drive`).
+- ✅ Rate-limit backoff — `RateLimitEvent.status == "rejected"` aborts the
+  attempt and `run_agent` retries with exponential backoff; count
+  surfaces as `rate_limit_attempts` in `CaseResult`.
+- ✅ Provenance in `meta.json` — `provenance.collect_static` captures SDK
+  version, `claude --version`, Python/platform, SKILL.md hash, per-case
+  hashes; `merge_dynamic` aggregates terminations/cost/retries post-run.
+- ✅ Per-case transcripts — written to
+  `runs/<ts>/transcripts/<case>-t<trial>.jsonl` with assistant text,
+  tool uses, tool results, rate-limit events, and retry markers.
+- ✅ Judge model separate from target — `grade.DEFAULT_JUDGE_MODEL`
+  (currently `claude-opus-4-6`); never falls back to `ctx.model`.
+- ✅ `schema_version` field on `CaseResult` (forward-compat insurance).
+
+Still open:
+
+1. **`HOME` isolation per case.** Subprocesses share `$HOME`; the SDK
+   writes to `~/.claude/sessions/`. Concurrent runs could collide.
+2. **Suite-level budget caps.** `--max-cost-usd N` / `--max-wall-s N`
+   with early abort.
+3. **`evalbench debug <suite> <case-id>`.** Streams assistant text and
+   tool calls to stdout in real time; `--keep-failed` + cat tempdir is
+   too many steps.
+4. **Judge calibration.** `evalbench calibrate <suite>` that runs the
+   judge against known-good and known-bad reference outputs and reports
+   precision/recall.
+5. **Global adaptive concurrency.** When rate-limit warnings fire,
+   halve the semaphore for the rest of the run.
+6. **Catastrophic-regex guard** in `file_contains` graders.
+7. **Lenient JSONL loader** that skips malformed lines with a warning.
