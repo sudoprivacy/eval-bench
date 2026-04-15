@@ -42,6 +42,9 @@ class CaseResult:
     termination: str = Termination.completed.value
     error: str | None = None
     cost_usd: float | None = None
+    rate_limit_attempts: int = 0
+    transcript_path: str | None = None
+    schema_version: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

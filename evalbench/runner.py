@@ -63,6 +63,22 @@ async def _grade_case(
     return out
 
 
+def _count_rate_limit_attempts(transcript: list[dict]) -> int:
+    """Number of retries that happened (0 = succeeded first try)."""
+    return sum(1 for e in transcript if e.get("kind") == "retry_marker")
+
+
+def _write_transcript(dir_: Path, case_id: str, trial: int,
+                      transcript: list[dict]) -> Path:
+    dir_.mkdir(parents=True, exist_ok=True)
+    path = dir_ / f"{case_id}-t{trial}.jsonl"
+    with path.open("w") as f:
+        for entry in transcript:
+            json.dump(entry, f, default=str)
+            f.write("\n")
+    return path
+
+
 async def run_case_trial(
     case: Case,
     suite: Suite,
@@ -71,6 +87,7 @@ async def run_case_trial(
     keep_failed: bool = False,
     agent_fn: AgentFn | None = None,
     judge_fn: JudgeFn | None = None,
+    transcript_dir: Path | None = None,
 ) -> CaseResult:
     """Run one trial of one case end-to-end and return the result."""
     assert suite.source_dir is not None
@@ -113,6 +130,14 @@ async def run_case_trial(
             agent.termination == Termination.completed.value
             and all(g.passed for g in grades)
         )
+
+        transcript_path: str | None = None
+        if transcript_dir is not None and agent.transcript:
+            p = _write_transcript(
+                transcript_dir, case.id, trial, agent.transcript,
+            )
+            transcript_path = str(p)
+
         result = CaseResult(
             case_id=case.id,
             trial=trial,
@@ -125,6 +150,8 @@ async def run_case_trial(
             termination=agent.termination,
             error=agent.error,
             cost_usd=agent.cost_usd,
+            rate_limit_attempts=_count_rate_limit_attempts(agent.transcript),
+            transcript_path=transcript_path,
         )
     except Exception as exc:
         result = CaseResult(
@@ -160,6 +187,7 @@ async def run_suite(
     agent_fn: AgentFn | None = None,
     judge_fn: JudgeFn | None = None,
     on_result: ResultHook | None = None,
+    transcript_dir: Path | None = None,
 ) -> list[CaseResult]:
     """Execute every (case, trial) pair with bounded concurrency.
 
@@ -186,6 +214,7 @@ async def run_suite(
                 keep_failed=keep_failed,
                 agent_fn=agent_fn,
                 judge_fn=judge_fn,
+                transcript_dir=transcript_dir,
             )
         async with write_lock:
             append_jsonl(results_path, result)

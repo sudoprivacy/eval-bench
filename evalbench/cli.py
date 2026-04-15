@@ -92,11 +92,17 @@ async def _run_async(
             f"wall_ms={result.wall_ms}"
         )
 
-    await run_suite(
-        suite, results_path,
-        filter_glob=filter_glob, keep_failed=keep_failed,
-        on_result=_on_result,
-    )
+    try:
+        await run_suite(
+            suite, results_path,
+            filter_glob=filter_glob, keep_failed=keep_failed,
+            on_result=_on_result,
+            transcript_dir=run_dir / "transcripts",
+        )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        # The async-with inside each agent call already disconnects
+        # subprocesses cleanly; report whatever we managed to write.
+        click.echo("\ninterrupted — partial results retained", err=True)
 
     report_path = write_report(run_dir)
     click.echo(f"\n{counter['ok']}/{total} passed → {results_path}")
