@@ -210,3 +210,65 @@ async def test_prompt_is_framed_with_working_directory(tmp_path: Path) -> None:
     assert "Working directory:" in seen["prompt"]
     assert seen["cwd"] in seen["prompt"]
     assert seen["prompt"].endswith("do it")
+
+
+@pytest.mark.asyncio
+async def test_transcript_is_written_when_dir_given(tmp_path: Path) -> None:
+    suite_dir = _make_suite(tmp_path)
+    suite = load_suite(suite_dir)
+
+    async def fake(prompt, options):
+        return AgentRunResult(
+            termination=Termination.completed.value,
+            transcript=[
+                {"kind": "assistant", "text": ["hi"], "tool_uses": []},
+                {"kind": "tool_result", "tool_use_id": "x", "is_error": False,
+                 "content": "ok"},
+            ],
+        )
+
+    t_dir = tmp_path / "tx"
+    result = await run_case_trial(
+        suite.cases[0], suite, 1, agent_fn=fake, transcript_dir=t_dir,
+    )
+    assert result.transcript_path is not None
+    lines = Path(result.transcript_path).read_text().splitlines()
+    assert len(lines) == 2
+    assert json.loads(lines[0])["kind"] == "assistant"
+    assert json.loads(lines[1])["kind"] == "tool_result"
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_attempts_counted(tmp_path: Path) -> None:
+    suite_dir = _make_suite(tmp_path)
+    suite = load_suite(suite_dir)
+
+    async def fake(prompt, options):
+        return AgentRunResult(
+            termination=Termination.completed.value,
+            transcript=[
+                {"kind": "rate_limit", "status": "rejected"},
+                {"kind": "retry_marker", "attempt": 1},
+                {"kind": "assistant", "text": ["hi"], "tool_uses": []},
+            ],
+        )
+
+    result = await run_case_trial(suite.cases[0], suite, 1, agent_fn=fake)
+    assert result.rate_limit_attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_transcript_not_written_when_empty(tmp_path: Path) -> None:
+    suite_dir = _make_suite(tmp_path)
+    suite = load_suite(suite_dir)
+
+    async def fake(prompt, options):
+        return AgentRunResult(termination=Termination.completed.value)
+
+    t_dir = tmp_path / "tx"
+    result = await run_case_trial(
+        suite.cases[0], suite, 1, agent_fn=fake, transcript_dir=t_dir,
+    )
+    assert result.transcript_path is None
+    # Dir may not have been created.
+    assert not t_dir.exists() or list(t_dir.iterdir()) == []

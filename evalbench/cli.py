@@ -13,6 +13,7 @@ import click
 from . import __version__
 from .config import load_suite
 from .diff import write_diff
+from .provenance import collect_static, merge_dynamic
 from .report import write_report
 from .runner import run_suite
 
@@ -70,13 +71,16 @@ async def _run_async(
     run_dir = Path(runs_dir) / stamp
     run_dir.mkdir(parents=True, exist_ok=True)
     results_path = run_dir / "results.jsonl"
-    (run_dir / "meta.json").write_text(json.dumps({
+    meta_path = run_dir / "meta.json"
+    meta = {
         "suite_dir": str(Path(suite_dir).resolve()),
         "trials": suite.run.trials,
         "concurrency": suite.run.concurrency,
         "model": suite.run.model,
         "started_at": stamp,
-    }, indent=2))
+        "provenance": collect_static(suite),
+    }
+    meta_path.write_text(json.dumps(meta, indent=2))
 
     total = len(cases) * suite.run.trials
     counter = {"done": 0, "ok": 0}
@@ -92,11 +96,21 @@ async def _run_async(
             f"wall_ms={result.wall_ms}"
         )
 
-    await run_suite(
-        suite, results_path,
-        filter_glob=filter_glob, keep_failed=keep_failed,
-        on_result=_on_result,
-    )
+    try:
+        await run_suite(
+            suite, results_path,
+            filter_glob=filter_glob, keep_failed=keep_failed,
+            on_result=_on_result,
+            transcript_dir=run_dir / "transcripts",
+        )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        # The async-with inside each agent call already disconnects
+        # subprocesses cleanly; report whatever we managed to write.
+        click.echo("\ninterrupted — partial results retained", err=True)
+
+    # Merge dynamic provenance (termination counts, cost, retries) into meta.
+    meta["dynamic"] = merge_dynamic(results_path)
+    meta_path.write_text(json.dumps(meta, indent=2))
 
     report_path = write_report(run_dir)
     click.echo(f"\n{counter['ok']}/{total} passed → {results_path}")

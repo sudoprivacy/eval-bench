@@ -99,10 +99,27 @@ runner or target modules.
    For serious evals, pin the judge model explicitly in the grader
    config and make it at least as strong as the target.
 
-7. **`llm_judge` output parsing is lenient** — `_parse_judge_output`
-   accepts the first JSON object in the reply. If you change the
-   judge system prompt, keep the `{"passed": bool, "reason": str}`
-   contract or update the parser.
+7. **Judge output is schema-validated by the SDK** — `_default_judge`
+   passes `output_format={"type": "json_schema", ...}`, and the grader
+   reads `ResultMessage.structured_output` directly. There is **no
+   regex fallback**: a missing or malformed `structured_output` fails
+   the grader as an infrastructure error, not silently. Don't add a
+   fallback — the contract with the SDK is the contract.
+
+8. **The judge is an agent** — it gets `Read`, `Glob`, `Grep` tools
+   scoped to the case cwd (no Bash/Write/Edit, so it can't mutate
+   files and corrupt later graders). Per `LlmJudgeGrader`:
+   `tools: [...]` overrides the tool set; `max_turns` defaults to 12.
+   The judge explores on its own, so rubrics like "is the greeting
+   polite?" see the actual file, not just the agent's spoken reply.
+
+9. **`judge_evidence` is a hint, not a whitelist** — after the agent
+   runs, `runner._collect_evidence` snapshots text files from the
+   case cwd (bounded: 8 files, 64 KiB each, 256 KiB total) and the
+   judge prompt embeds them verbatim as a starter. The judge can
+   still `Read` any file in cwd. `judge_evidence: [file1]` narrows
+   the hint; `judge_evidence: []` sends no hint (judge must explore).
+   Path traversal outside cwd is rejected even for explicit lists.
 
 ## Conventions
 
@@ -195,14 +212,37 @@ manually and inspect `results.jsonl`. A two-case suite is ~$0.10.
 
 ## Open robustness gaps (as of this writing)
 
-Tracked in discussion, not yet code:
+Done:
 
-1. Subprocess cleanup on timeout/cancel (orphan `claude` processes).
-2. Rate-limit backoff + adaptive concurrency.
-3. Model pinning + provenance (SKILL.md hash, SDK version) in `meta.json`.
-4. Per-case transcripts (`transcript.jsonl`) for failure debugging.
-5. JSONL `schema_version` + lenient loader.
-6. `HOME` isolation per case.
-7. Separate judge-model from target-model by default.
-8. Suite-level budget caps (`max_cost_usd`, `max_wall_s`).
-9. `evalbench debug <suite> <case-id>` for one-case verbose mode.
+- ✅ Subprocess cleanup on timeout/cancel — `ClaudeSDKClient` used as async
+  context manager so the `claude` subprocess is disconnected on exit
+  (`agent.py::_drive`).
+- ✅ Rate-limit backoff — `RateLimitEvent.status == "rejected"` aborts the
+  attempt and `run_agent` retries with exponential backoff; count
+  surfaces as `rate_limit_attempts` in `CaseResult`.
+- ✅ Provenance in `meta.json` — `provenance.collect_static` captures SDK
+  version, `claude --version`, Python/platform, SKILL.md hash, per-case
+  hashes; `merge_dynamic` aggregates terminations/cost/retries post-run.
+- ✅ Per-case transcripts — written to
+  `runs/<ts>/transcripts/<case>-t<trial>.jsonl` with assistant text,
+  tool uses, tool results, rate-limit events, and retry markers.
+- ✅ Judge model separate from target — `grade.DEFAULT_JUDGE_MODEL`
+  (currently `claude-opus-4-6`); never falls back to `ctx.model`.
+- ✅ `schema_version` field on `CaseResult` (forward-compat insurance).
+
+Still open:
+
+1. **`HOME` isolation per case.** Subprocesses share `$HOME`; the SDK
+   writes to `~/.claude/sessions/`. Concurrent runs could collide.
+2. **Suite-level budget caps.** `--max-cost-usd N` / `--max-wall-s N`
+   with early abort.
+3. **`evalbench debug <suite> <case-id>`.** Streams assistant text and
+   tool calls to stdout in real time; `--keep-failed` + cat tempdir is
+   too many steps.
+4. **Judge calibration.** `evalbench calibrate <suite>` that runs the
+   judge against known-good and known-bad reference outputs and reports
+   precision/recall.
+5. **Global adaptive concurrency.** When rate-limit warnings fire,
+   halve the semaphore for the rest of the run.
+6. **Catastrophic-regex guard** in `file_contains` graders.
+7. **Lenient JSONL loader** that skips malformed lines with a warning.

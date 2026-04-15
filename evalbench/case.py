@@ -31,6 +31,11 @@ class Case(BaseModel):
     limits: Limits = Field(default_factory=Limits)
     grade: list[Grader] = Field(default_factory=list)
 
+    # Explicit list of files (relative to cwd) to pass to llm_judge graders
+    # as evidence. `None` means auto-discover (bounded snapshot of cwd);
+    # `[]` means send no files — only the agent's spoken reply.
+    judge_evidence: list[str] | None = None
+
     # Populated by the loader so the runner can resolve relative paths.
     source_path: Path | None = None
 
