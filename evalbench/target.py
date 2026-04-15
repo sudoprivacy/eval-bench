@@ -1,13 +1,11 @@
-"""SUT (system-under-test) target data models.
-
-Runtime translation to `ClaudeAgentOptions` lives in a later step; this
-module only defines the schema used by suite configs.
-"""
+"""SUT (system-under-test) target data models and runtime adapter."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated, Literal, Union
 
+from claude_agent_sdk import ClaudeAgentOptions
 from pydantic import BaseModel, Field
 
 
@@ -43,3 +41,56 @@ Target = Annotated[
     Union[SkillTarget, PromptTarget, CliTarget],
     Field(discriminator="type"),
 ]
+
+
+class TargetBuildError(Exception):
+    """Raised when a target cannot be realized into agent options."""
+
+
+def build_options(
+    target: Target,
+    *,
+    suite_dir: Path,
+    cwd: Path,
+    model: str | None = None,
+    max_turns: int | None = None,
+) -> ClaudeAgentOptions:
+    """Translate a `Target` into `ClaudeAgentOptions` for the runner.
+
+    `suite_dir` is the directory the suite.yaml lives in; used to resolve
+    relative paths (e.g. a skill path). `cwd` is the per-case working
+    directory the agent runs in.
+    """
+    if isinstance(target, SkillTarget):
+        skill_path = (suite_dir / target.path).resolve()
+        if not skill_path.is_dir():
+            raise TargetBuildError(f"skill path is not a directory: {skill_path}")
+        skill_md = skill_path / "SKILL.md"
+        if not skill_md.is_file():
+            raise TargetBuildError(f"skill is missing SKILL.md: {skill_md}")
+        system_prompt = skill_md.read_text()
+        allowed_tools = list(target.allowed_tools)
+        add_dirs = [skill_path]
+    elif isinstance(target, PromptTarget):
+        system_prompt = target.system_prompt
+        allowed_tools = list(target.allowed_tools)
+        add_dirs = []
+    elif isinstance(target, CliTarget):
+        system_prompt = (
+            target.system_prompt
+            if target.system_prompt is not None
+            else f"You have access to the `{target.binary}` CLI via the Bash tool."
+        )
+        allowed_tools = list(target.allowed_tools)
+        add_dirs = []
+    else:  # pragma: no cover — discriminated union exhausts this
+        raise TargetBuildError(f"unknown target type: {type(target).__name__}")
+
+    return ClaudeAgentOptions(
+        system_prompt=system_prompt,
+        allowed_tools=allowed_tools,
+        cwd=str(cwd),
+        add_dirs=add_dirs,
+        model=model,
+        max_turns=max_turns,
+    )
