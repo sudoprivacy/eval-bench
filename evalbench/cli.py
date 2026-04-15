@@ -12,6 +12,7 @@ import click
 
 from . import __version__
 from .config import load_suite
+from .diff import write_diff
 from .report import write_report
 from .runner import run_suite
 
@@ -116,7 +117,8 @@ def report(run_dir: str) -> None:
               help="Baseline run directory to diff against.")
 def diff(run_dir: str, baseline: str) -> None:
     """Diff a run against a baseline run."""
-    click.echo(f"[stub] diff run={run_dir} baseline={baseline}")
+    path = write_diff(Path(run_dir), Path(baseline))
+    click.echo(f"wrote {path}")
 
 
 if __name__ == "__main__":
